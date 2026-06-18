@@ -1,0 +1,10 @@
+{
+  "name": "young_low_income",
+  "CAR_AVAILABLE": false,
+  "NEEDS_STEP_FREE": false,
+  "HAS_BUS_PASS": false,
+  "WALK_TOLERANCE": 4000,
+  "FARE_MAX": 1000,
+  "HAS_BIKE": true,
+  "BIKE_TOLERANCE": 8000
+}

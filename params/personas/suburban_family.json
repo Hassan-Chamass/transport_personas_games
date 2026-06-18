@@ -1,0 +1,10 @@
+{
+  "name": "suburban_family",
+  "CAR_AVAILABLE": true,
+  "NEEDS_STEP_FREE": false,
+  "HAS_BUS_PASS": false,
+  "WALK_TOLERANCE": 800,
+  "FARE_MAX": 2500,
+  "HAS_BIKE": true,
+  "BIKE_TOLERANCE": 6000
+}

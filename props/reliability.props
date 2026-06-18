@@ -1,0 +1,57 @@
+// Reliability Properties - Disrupted Journey (3-player CSG)
+// Players: persona + operator (coalition) vs environment
+// Run with: prism-games models\disrupted.pm props\reliability.props -prop N -const ...
+
+
+// --- Journey success / failure ---
+
+// 1. Max probability of reaching destination (persona+operator vs adversarial environment)
+<<persona,operator>> Pmax=? [ F loc=3 ]
+
+// 2. Max failure probability the environment can force
+<<environment>> Pmax=? [ F loc=4 ]
+
+// 3. Guaranteed termination probability (success or abandonment)
+<<persona,operator>> Pmin=? [ F (loc=3|loc=4) ]
+
+
+// --- Journey cost (any mode) ---
+
+// 4. Min expected travel time
+<<persona,operator>> R{"time"}min=? [ F (loc=3|loc=4) ]
+
+// 5. Min expected CO2e
+<<persona,operator>> R{"co2e"}min=? [ F (loc=3|loc=4) ]
+
+// 6. Min expected fare
+<<persona,operator>> R{"fare"}min=? [ F (loc=3|loc=4) ]
+
+
+// --- Journey cost (car-free, mode!=1) ---
+
+// 7. Max probability of reaching destination without car
+<<persona,operator>> Pmax=? [ F (loc=3 & mode!=1) ]
+
+// 8. Min expected travel time without car
+<<persona,operator>> R{"time"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+// 9. Min expected CO2e without car
+<<persona,operator>> R{"co2e"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+// 10. Min expected fare without car
+<<persona,operator>> R{"fare"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+
+// --- Journey cost (public transport only: no car, no taxi) ---
+
+// 11. Max probability of reaching destination by public transport only
+<<persona,operator>> Pmax=? [ F (loc=3 & mode!=1 & mode!=4) ]
+
+// 12. Min expected travel time by public transport only
+<<persona,operator>> R{"time"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]
+
+// 13. Min expected CO2e by public transport only
+<<persona,operator>> R{"co2e"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]
+
+// 14. Min expected fare by public transport only
+<<persona,operator>> R{"fare"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]

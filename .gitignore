@@ -1,0 +1,29 @@
+# ── PRISM output files ──────────────────────────────────────────────────────
+results/
+*.tra
+*.sta
+*.lab
+*.adv
+*.log
+
+# ── Generated figures / reports ─────────────────────────────────────────────
+report/figures/
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# ── Node (make_pptx.js) ─────────────────────────────────────────────────────
+node_modules/
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

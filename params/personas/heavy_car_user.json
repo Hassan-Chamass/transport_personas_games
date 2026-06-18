@@ -1,0 +1,10 @@
+{
+  "name": "heavy_car_user",
+  "CAR_AVAILABLE": true,
+  "NEEDS_STEP_FREE": false,
+  "HAS_BUS_PASS": false,
+  "WALK_TOLERANCE": 500,
+  "FARE_MAX": 5000,
+  "HAS_BIKE": false,
+  "BIKE_TOLERANCE": 0
+}

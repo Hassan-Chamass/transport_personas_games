@@ -1,0 +1,70 @@
+{
+    "_corridor": "Giffnock to University of Glasgow (Gilmorehill)",
+    "_unit_dist": "kilometres",
+    "_unit_time": "minutes",
+
+    "available_modes_from_stop": {
+        "bus":  true,
+        "rail": true
+    },
+    "available_modes_from_interchange": {
+        "bus":  true,
+        "rail": false
+    },
+
+    "segments": {
+        "walk_to_stop": {
+            "dist_km": 0.35,
+            "time_min": 5
+        },
+        "bus_stop_to_interchange": {
+            "dist_km": 5.0,
+            "time_min": 35
+        },
+        "rail_stop_to_interchange": {
+            "dist_km": 5.0,
+            "time_min": 12
+        },
+        "bus_interchange_to_dest": {
+            "dist_km": 2.0,
+            "time_min": 20
+        },
+        "rail_interchange_to_dest": {
+            "_note": "unused for this corridor (HAS_RAIL_FINAL=false)",
+            "dist_km": 0.0,
+            "time_min": 0
+        },
+        "walk_interchange_to_dest": {
+            "dist_km": 2.0,
+            "time_min": 25
+        },
+        "car_direct": {
+            "dist_km": 8.0,
+            "time_min": { "clear": 30, "rain": 45, "severe": 60 }
+        },
+        "taxi_direct": {
+            "dist_km": 8.0,
+            "time_min": { "clear": 28, "rain": 42, "severe": 56 }
+        },
+        "taxi_from_stop": {
+            "dist_km": 7.0,
+            "time_min": { "clear": 22, "rain": 33, "severe": 44 }
+        },
+        "taxi_final_leg": {
+            "dist_km": 2.0,
+            "time_min": { "clear": 10, "rain": 15, "severe": 20 }
+        },
+        "taxi_back_home": {
+            "dist_km": 6.0,
+            "time_min": { "clear": 20, "rain": 30, "severe": 40 }
+        },
+        "bike_direct": {
+            "dist_km": 8.0,
+            "time_min": 44
+        },
+        "walk_direct": {
+            "dist_km": 8.0,
+            "time_min": 96
+        }
+    }
+}

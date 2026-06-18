@@ -1,0 +1,13 @@
+{
+    "_source": "UK DfT 2025 condensed set of emission factors (scope 3 inclusive)",
+    "_url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2025",
+    "_unit": "grams CO2e per passenger-km (active modes: 0 g/pkm)",
+    "factors_g_per_pkm": {
+        "taxi":               148.6,
+        "local_bus":          125.25,
+        "national_rail":       35.46,
+        "active":               0.0
+    },
+    "_note_car": "Car uses g per vehicle-km (not per passenger-km) assuming single occupancy",
+    "car_g_per_vkm": 168.0
+}

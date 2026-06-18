@@ -1,0 +1,123 @@
+// SMG Properties — disrupted_smg.pm
+// Turn-based SMG: environment (turn=0) -> persona (turn=1) -> operator (turn=2)
+//
+// Sections:
+//   A. Single-objective (identical to reliability.props — works with both CSG and SMG)
+//   B. Threshold yes/no (identical to thresholds.props — works with both)
+//   C. Multi-objective (SMG only — Michele's "most attractive part")
+//
+// Run with: prism-games models\disrupted_smg.pm props\smg.props -prop N -const ...
+
+
+// ============================
+// SECTION A — SINGLE-OBJECTIVE
+// ============================
+
+// 1. Max arrival probability (persona+operator coalition vs adversarial environment)
+<<persona,operator>> Pmax=? [ F loc=3 ]
+
+// 2. Max failure probability the environment can force
+<<environment>> Pmax=? [ F loc=4 ]
+
+// 3. Guaranteed termination (success or abandonment)
+<<persona,operator>> Pmin=? [ F (loc=3|loc=4) ]
+
+// 4. Min expected travel time (any mode)
+<<persona,operator>> R{"time"}min=? [ F (loc=3|loc=4) ]
+
+// 5. Min expected CO2e (any mode)
+<<persona,operator>> R{"co2e"}min=? [ F (loc=3|loc=4) ]
+
+// 6. Min expected fare (any mode)
+<<persona,operator>> R{"fare"}min=? [ F (loc=3|loc=4) ]
+
+// 7. Max arrival probability without car (mode!=1)
+<<persona,operator>> Pmax=? [ F (loc=3 & mode!=1) ]
+
+// 8. Min expected travel time without car
+<<persona,operator>> R{"time"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+// 9. Min expected CO2e without car
+<<persona,operator>> R{"co2e"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+// 10. Min expected fare without car
+<<persona,operator>> R{"fare"}min=? [ F (loc=4|(loc=3 & mode!=1)) ]
+
+// 11. Max arrival probability by public transport only (no car, no taxi)
+<<persona,operator>> Pmax=? [ F (loc=3 & mode!=1 & mode!=4) ]
+
+// 12. Min expected travel time by public transport only
+<<persona,operator>> R{"time"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]
+
+// 13. Min expected CO2e by public transport only
+<<persona,operator>> R{"co2e"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]
+
+// 14. Min expected fare by public transport only
+<<persona,operator>> R{"fare"}min=? [ F (loc=4|(loc=3 & mode!=1 & mode!=4)) ]
+
+
+// ============================
+// SECTION B — THRESHOLDS (yes/no)
+// ============================
+
+// 15. Strong reliability: can coalition guarantee >=95% arrival?
+<<persona,operator>> P>=0.95 [ F loc=3 ]
+
+// 16. Moderate reliability: can coalition guarantee >=80% arrival?
+<<persona,operator>> P>=0.80 [ F loc=3 ]
+
+// 17. Adversarial exposure: can environment force >=20% failure?
+<<environment>> P>=0.20 [ F loc=4 ]
+
+// 18. Adversarial exposure: can environment force >=10% failure?
+<<environment>> P>=0.10 [ F loc=4 ]
+
+
+// ============================
+// SECTION C — MULTI-OBJECTIVE (SMG only)
+// "Does a joint strategy exist satisfying BOTH constraints simultaneously,
+//  against any adversarial environment strategy?"
+// ============================
+
+// --- Reliability x Carbon ---
+
+// 19. Can coalition guarantee 90% arrival AND expected CO2e <=500g?
+multi( <<persona,operator>> P>=0.90 [ F loc=3 ], <<persona,operator>> R{"co2e"}<=500 [ F (loc=3|loc=4) ] )
+
+// 20. Can coalition guarantee 80% arrival AND expected CO2e <=500g?
+multi( <<persona,operator>> P>=0.80 [ F loc=3 ], <<persona,operator>> R{"co2e"}<=500 [ F (loc=3|loc=4) ] )
+
+// 21. Can coalition guarantee 90% arrival AND expected CO2e <=1000g?
+multi( <<persona,operator>> P>=0.90 [ F loc=3 ], <<persona,operator>> R{"co2e"}<=1000 [ F (loc=3|loc=4) ] )
+
+// 22. Can coalition guarantee 80% arrival AND expected CO2e <=1000g?
+multi( <<persona,operator>> P>=0.80 [ F loc=3 ], <<persona,operator>> R{"co2e"}<=1000 [ F (loc=3|loc=4) ] )
+
+// --- Reliability x Fare ---
+
+// 23. Can coalition guarantee 90% arrival AND expected fare <=300p (bus-grade)?
+<<persona,operator>> (P>=0.90 [ F loc=3 ] & R{"fare"}<=300 [ F (loc=3|loc=4) ] )
+
+// 24. Can coalition guarantee 80% arrival AND expected fare <=300p?
+multi( <<persona,operator>> P>=0.80 [ F loc=3 ], <<persona,operator>> R{"fare"}<=300 [ F (loc=3|loc=4) ] )
+
+// 25. Can coalition guarantee 90% arrival AND expected fare <=500p (rail-grade)?
+multi( <<persona,operator>> P>=0.90 [ F loc=3 ], <<persona,operator>> R{"fare"}<=500 [ F (loc=3|loc=4) ] )
+
+// 26. Can coalition guarantee 80% arrival AND expected fare <=500p?
+multi( <<persona,operator>> P>=0.80 [ F loc=3 ], <<persona,operator>> R{"fare"}<=500 [ F (loc=3|loc=4) ] )
+
+// --- Pareto fronts (quantitative trade-off curves) ---
+
+// 27. Pareto front: reliability vs carbon — what CO2e is needed to achieve max reliability?
+multi( <<persona,operator>> Pmax=? [ F loc=3 ], <<persona,operator>> R{"co2e"}min=? [ F (loc=3|loc=4) ] )
+
+// 28. Pareto front: reliability vs fare — what fare is needed to achieve max reliability?
+multi( <<persona,operator>> Pmax=? [ F loc=3 ], <<persona,operator>> R{"fare"}min=? [ F (loc=3|loc=4) ] )
+
+// 29. Pareto front: reliability vs time — what time is needed to achieve max reliability?
+multi( <<persona,operator>> Pmax=? [ F loc=3 ], <<persona,operator>> R{"time"}min=? [ F (loc=3|loc=4) ] )
+
+
+// 30. Pareto front: carbon vs fare — what fare is needed to achieve min CO2e?
+<<persona,operator>> (R{"co2e"} <= 100 [ C ] & R{"fare"} <= 20 [ C ])

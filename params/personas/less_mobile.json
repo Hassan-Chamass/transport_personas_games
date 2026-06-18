@@ -1,0 +1,10 @@
+{
+  "name": "less_mobile",
+  "CAR_AVAILABLE": true,
+  "NEEDS_STEP_FREE": true,
+  "HAS_BUS_PASS": false,
+  "WALK_TOLERANCE": 200,
+  "FARE_MAX": 3000,
+  "HAS_BIKE": false,
+  "BIKE_TOLERANCE": 0
+}

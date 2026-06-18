@@ -1,0 +1,40 @@
+{
+  "_template_version": "2.0",
+  "_source": "UK DfT meet-the-personas-pack.pdf (v3 June 2023)",
+  "_note": "Fields prefixed with _ are not passed to PRISM. All other fields become -const values.",
+
+  "name": "persona_name",
+
+  "_identity": "=== IDENTITY (from DfT PDF) ===",
+  "PERSONA": 0,
+  "_dft_segment": 1,
+  "_dft_segment_name": "e.g. Less Mobile Car Reliant",
+  "_example_persona": "e.g. Brian / Betty",
+
+  "_mobility": "=== MOBILITY (directly from PDF segment profiles) ===",
+  "WALK_TOLERANCE": 500,
+  "NEEDS_STEP_FREE": false,
+  "MOBILITY_IMPAIRED": false,
+  "HAS_BIKE": false,
+  "CYCLE_TOLERANCE": 0,
+
+  "_vehicle": "=== VEHICLE ACCESS ===",
+  "CAR_AVAILABLE": false,
+  "CAR_SHARE_ACCESS": false,
+
+  "_financial": "=== FINANCIAL ===",
+  "FARE_MAX": 2000,
+  "HAS_BUS_PASS": false,
+  "HAS_RAILCARD": false,
+  "INCOME_LEVEL": 1,
+
+  "_time": "=== TIME SENSITIVITY ===",
+  "TIME_MAX": 60,
+  "HAS_STRICT_TIME_WINDOW": false,
+
+  "_preferences": "=== PREFERENCES & ATTITUDES (from PDF enablers/barriers) ===",
+  "PREFERS_ACTIVE_TRAVEL": false,
+  "CARBON_CONSCIOUS": false,
+  "COMFORT_PREFERENCE": 1,
+  "HAS_CHILDREN": false
+}

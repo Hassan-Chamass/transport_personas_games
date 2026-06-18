@@ -1,0 +1,10 @@
+{
+  "name": "elderly_no_car",
+  "CAR_AVAILABLE": false,
+  "NEEDS_STEP_FREE": true,
+  "HAS_BUS_PASS": true,
+  "WALK_TOLERANCE": 350,
+  "FARE_MAX": 1200,
+  "HAS_BIKE": false,
+  "BIKE_TOLERANCE": 0
+}
