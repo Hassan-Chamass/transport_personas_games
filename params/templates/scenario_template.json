@@ -1,36 +1,15 @@
 {
-  "_template_version": "1.0",
-  "_note": "Scenario/environment parameters — independent of persona. Fields prefixed with _ are not passed to PRISM.",
-
-  "name": "scenario_name",
-
-  "_service": "=== SERVICE DISRUPTION (m_service) ===",
-  "DISRUPTION_BUDGET": 1,
-  "MINOR_DELAY_PROB": 0.20,
-  "MODERATE_DELAY_PROB": 0.15,
-  "SEVERE_DELAY_PROB": 0.10,
-  "CANCEL_PROB": 0.05,
-
-  "_accessibility": "=== ACCESSIBILITY INFRASTRUCTURE (m_accessibility + m_operator) ===",
-  "ACCESSIBILITY_DISRUPTION_BUDGET": 1,
-  "LIFT_BREAK_PROB": 0.10,
-  "NO_ACCESSIBLE_BUS_PROB": 0.10,
-  "ASSIST_ALLOC_PROB": 0.80,
-
-  "_information": "=== INFORMATION SYSTEM (m_information) ===",
-  "INFO_FAILURE_PROB": 0.10,
-
-  "_crowding": "=== CROWDING (m_aggregate_demand) ===",
-  "CROWDING_INIT": 0,
-  "CROWDING_SURGE_PROB": 0.15,
-
-  "_weather": "=== WEATHER (m_weather) ===",
-  "WEATHER_DISRUPTION_BUDGET": 1,
-  "RAIN_PROB": 0.20,
-  "SEVERE_WEATHER_PROB": 0.05,
-
-  "_presets": "=== PRESET SCENARIOS ===",
-  "_preset_baseline": "all probs=0.0, DISRUPTION_BUDGET=0",
-  "_preset_light": "DELAY_PROB=0.20, CANCEL_PROB=0.05, DISRUPTION_BUDGET=1",
-  "_preset_heavy": "DELAY_PROB=0.40, CANCEL_PROB=0.20, LIFT_FAILURE_PROB=0.15, DISRUPTION_BUDGET=2"
+  "name": "high_disruption",
+  "MINOR_DELAY_PROB": 0.25,
+  "MODERATE_DELAY_PROB": 0.20,
+  "SEVERE_DELAY_PROB": 0.15,
+  "CANCEL_PROB": 0.20,
+  "DISRUPTION_BUDGET": 2,
+  "LIFT_BREAK_PROB": 0.20,
+  "NO_ACCESSIBLE_BUS_PROB": 0.20,
+  "ASSIST_ALLOC_PROB": 0.60,
+  "ACCESSIBILITY_DISRUPTION_BUDGET": 2,
+  "RAIN_PROB": 0.35,
+  "SEVERE_WEATHER_PROB": 0.15,
+  "WEATHER_DISRUPTION_BUDGET": 2
 }

@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PRISM Transport SMG Verificator</title>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6fa; color: #1a1a2e; min-height: 100vh; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+header { background: #1a1a2e; color: #fff; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+header h1 { font-size: 1.2rem; font-weight: 600; }
+header span { font-size: 0.8rem; opacity: 0.6; }
+.container { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+
+/* ── Step Progress Bar ───────────────────────────────────────────────────────── */
+.steps-bar { display: flex; align-items: center; margin-bottom: 2rem; }
+.step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+.step-item:not(:last-child)::after { content: ''; position: absolute; top: 16px; left: 50%; width: 100%; height: 2px; background: #dde1ec; z-index: 0; }
+.step-item.done:not(:last-child)::after { background: #4361ee; }
+.step-dot { width: 32px; height: 32px; border-radius: 50%; background: #dde1ec; color: #888; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; position: relative; z-index: 1; transition: background 0.2s, color 0.2s; cursor: pointer; }
+.step-item.active .step-dot { background: #4361ee; color: #fff; }
+.step-item.done   .step-dot { background: #4361ee; color: #fff; }
+.step-label { font-size: 0.65rem; margin-top: 4px; color: #888; text-align: center; white-space: nowrap; }
+.step-item.active .step-label, .step-item.done .step-label { color: #4361ee; font-weight: 600; }
+
+/* ── Card ────────────────────────────────────────────────────────────────────── */
+.card { background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 1.8rem 2rem; margin-bottom: 1.5rem; }
+.card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1.2rem; color: #1a1a2e; }
+.card h3 { font-size: 0.85rem; font-weight: 600; margin: 1.2rem 0 0.6rem; color: #444; }
+
+/* ── Form elements ───────────────────────────────────────────────────────────── */
+label { font-size: 0.8rem; color: #555; display: block; margin-bottom: 0.2rem; }
+select, input[type="text"], input[type="number"] { width: 100%; padding: 0.45rem 0.7rem; border: 1px solid #dde1ec; border-radius: 6px; font-size: 0.85rem; background: #fafbff; transition: border 0.15s; }
+select:focus, input:focus { outline: none; border-color: #4361ee; }
+input.field-error { border-color: #dc2626 !important; background: #fff5f5; }
+.field-row { margin-bottom: 0.8rem; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.8rem; }
+
+/* Toggle switch */
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #f0f0f0; font-size: 0.82rem; }
+.toggle-row:last-child { border-bottom: none; }
+.toggle { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; inset: 0; background: #dde1ec; border-radius: 20px; transition: background 0.2s; }
+.slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+input:checked + .slider { background: #4361ee; }
+input:checked + .slider::before { transform: translateX(18px); }
+
+/* ── Tabs ────────────────────────────────────────────────────────────────────── */
+.tabs { display: flex; border-bottom: 2px solid #dde1ec; margin: 1.2rem 0 0; }
+.tab-btn { padding: 0.45rem 1.1rem; font-size: 0.82rem; font-weight: 600; border: none; background: none; cursor: pointer; color: #888; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: color 0.15s, border-color 0.15s; }
+.tab-btn:hover { color: #4361ee; }
+.tab-btn.active { color: #4361ee; border-bottom-color: #4361ee; }
+.tab-panel { display: none; padding-top: 1rem; }
+.tab-panel.active { display: block; }
+
+/* ── Existing pills ──────────────────────────────────────────────────────────── */
+.checkbox-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.checkbox-pill { display: flex; align-items: center; gap: 0.4rem; background: #f4f6fa; border: 1px solid #dde1ec; border-radius: 20px; padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.8rem; transition: background 0.15s, border 0.15s; user-select: none; }
+.checkbox-pill input { display: none; }
+.checkbox-pill.selected { background: #eef1ff; border-color: #4361ee; color: #4361ee; font-weight: 600; }
+
+/* ── Selected items (expandable) ─────────────────────────────────────────────── */
+.selected-section { margin-bottom: 1.2rem; }
+.selected-section-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 0.5rem; }
+.selected-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.empty-msg { font-size: 0.78rem; color: #bbb; font-style: italic; padding: 0.3rem 0; }
+.sel-item { border: 1px solid #c7d0ff; border-radius: 7px; overflow: hidden; }
+.sel-item-header { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0.8rem; background: #eef1ff; }
+.sel-item-name { font-size: 0.82rem; font-weight: 700; color: #4361ee; flex: 1; }
+.sel-item-actions { display: flex; gap: 0.5rem; align-items: center; }
+.expand-btn { font-size: 0.65rem; cursor: pointer; color: #4361ee; padding: 0.15rem 0.45rem; border-radius: 3px; border: 1px solid #c7d0ff; background: #fff; user-select: none; transition: background 0.1s; line-height: 1.4; }
+.expand-btn:hover { background: #dde8ff; }
+.remove-btn { cursor: pointer; color: #aaa; font-size: 1.1rem; line-height: 1; padding: 0 0.1rem; transition: color 0.1s; }
+.remove-btn:hover { color: #dc2626; }
+.sel-item-body { display: none; padding: 0.6rem 0.8rem; background: #f9faff; border-top: 1px solid #e8ecff; }
+.sel-item-body.open { display: block; }
+.val-grid { display: flex; flex-direction: column; gap: 0.25rem; }
+.val-row { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.74rem; }
+.val-key { color: #666; font-family: monospace; white-space: nowrap; }
+.val-num  { font-weight: 600; color: #1a1a2e; font-family: monospace; }
+.val-true { font-weight: 700; color: #16a34a; font-family: monospace; }
+.val-false{ font-weight: 700; color: #dc2626; font-family: monospace; }
+
+/* ── Props table ─────────────────────────────────────────────────────────────── */
+.props-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.props-table th { text-align: left; padding: 0.5rem 0.6rem; background: #f4f6fa; border-bottom: 2px solid #dde1ec; color: #555; }
+.props-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid #f0f0f0; }
+.props-table tr:not(.section-row):hover td { background: #fafbff; cursor: pointer; }
+.section-row td { font-weight: 700; background: #eef1ff; color: #4361ee; font-size: 0.72rem; padding: 0.3rem 0.6rem; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────────────── */
+.btn { padding: 0.55rem 1.4rem; border-radius: 7px; border: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: background 0.15s, opacity 0.15s; }
+.btn-primary   { background: #4361ee; color: #fff; }
+.btn-primary:hover { background: #3451d1; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary { background: #f0f0f5; color: #444; }
+.btn-secondary:hover { background: #e0e0ea; }
+.btn-sm { padding: 0.3rem 0.8rem; font-size: 0.75rem; }
+
+.nav-row { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; }
+
+/* ── Segment editor ───────────────────────────────────────────────────────────── */
+.segment-block { background: #f9faff; border: 1px solid #e8ecff; border-radius: 7px; padding: 0.8rem 1rem; margin-bottom: 0.8rem; }
+.segment-block h4 { font-size: 0.78rem; font-weight: 700; color: #4361ee; margin-bottom: 0.6rem; }
+
+/* ── Notices ──────────────────────────────────────────────────────────────────── */
+.save-msg { font-size: 0.75rem; color: #16a34a; }
+.req { color: #dc2626; }
+
+/* ── Results ──────────────────────────────────────────────────────────────────── */
+#results-panel { display: none; }
+.run-block { margin-bottom: 2rem; }
+.policy-section-header { font-size: 0.85rem; font-weight: 700; color: #4361ee; background: #eef0ff; border-radius: 6px; padding: 0.4rem 0.8rem; margin: 1.2rem 0 0.6rem; letter-spacing: 0.02em; }
+.run-title { font-size: 0.9rem; font-weight: 700; color: #1a1a2e; margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.6rem; }
+.run-title .badge { font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; background: #f0f4ff; color: #4361ee; }
+.progress-bar-wrap { background: #f0f0f5; border-radius: 4px; height: 6px; margin-bottom: 1rem; }
+.progress-bar { height: 6px; border-radius: 4px; background: #4361ee; width: 0%; transition: width 0.3s; }
+.results-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.results-table th { text-align: left; padding: 0.45rem 0.6rem; background: #f4f6fa; border-bottom: 2px solid #dde1ec; color: #555; }
+.results-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #f0f0f0; }
+.result-val { font-weight: 700; font-family: monospace; }
+.result-val.ok         { color: #16a34a; }
+.result-val.bool-true  { color: #16a34a; }
+.result-val.bool-false { color: #dc2626; }
+.result-val.err        { color: #dc2626; }
+.result-val.pending    { color: #aaa; }
+.overall-progress { font-size: 0.8rem; color: #555; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.6rem; }
+.spinner { width: 14px; height: 14px; border: 2px solid #dde1ec; border-top-color: #4361ee; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── App layout ──────────────────────────────────────────────────────────── */
+.app-layout { display: flex; gap: 1.5rem; max-width: 1140px; margin: 2rem auto; padding: 0 1.5rem; align-items: flex-start; }
+.wizard-main { flex: 1; min-width: 0; }
+.wizard-sidebar { width: 215px; flex-shrink: 0; position: sticky; top: 1.5rem; }
+@media (max-width: 800px) { .app-layout { flex-direction: column; } .wizard-sidebar { width: 100%; position: static; } }
+
+/* ── Summary sidebar card ────────────────────────────────────────────────── */
+.summary-card { background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 1rem; }
+.summary-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 0.8rem; }
+.summary-row { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.45rem 0.6rem; border-radius: 6px; cursor: pointer; transition: background 0.12s; margin-bottom: 0.2rem; }
+.summary-row:hover { background: #f4f6fa; }
+.summary-row.active { background: #eef1ff; }
+.sum-label { font-size: 0.67rem; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+.sum-val { font-size: 0.75rem; color: #1a1a2e; font-weight: 500; line-height: 1.4; }
+.sum-val.empty { color: #bbb; font-style: italic; }
+
+/* ── Model overview toggle ───────────────────────────────────────────────── */
+.info-toggle { font-size: 0.78rem; font-weight: 600; color: #4361ee; background: none; border: 1px solid #c7d0ff; border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer; margin-bottom: 1rem; transition: background 0.12s; display: inline-block; }
+.info-toggle:hover { background: #eef1ff; }
+.model-overview { display: none; margin-bottom: 1.2rem; background: #f9faff; border: 1px solid #e8ecff; border-radius: 8px; padding: 0.8rem; overflow-x: auto; }
+.model-overview.open { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>PRISM Transport SMG Verificator</h1>
+    <span>transport_smg.pm · transport_smg.props</span>
+  </div>
+</header>
+
+<div class="app-layout" id="app-layout">
+<div class="wizard-main">
+
+  <!-- Step progress bar -->
+  <div class="steps-bar" id="steps-bar">
+    <div class="step-item active" data-step="1" onclick="goToStep(1)"><div class="step-dot">1</div><div class="step-label">Trip</div></div>
+    <div class="step-item"        data-step="2" onclick="goToStep(2)"><div class="step-dot">2</div><div class="step-label">Personas</div></div>
+    <div class="step-item"        data-step="3" onclick="goToStep(3)"><div class="step-dot">3</div><div class="step-label">Scenarios</div></div>
+    <div class="step-item"        data-step="4" onclick="goToStep(4)"><div class="step-dot">4</div><div class="step-label">Configuration</div></div>
+    <div class="step-item"        data-step="5" onclick="goToStep(5)"><div class="step-dot">5</div><div class="step-label">Fares</div></div>
+    <div class="step-item"        data-step="6" onclick="goToStep(6)"><div class="step-dot">6</div><div class="step-label">Properties</div></div>
+  </div>
+
+  <!-- ══ STEP 1: TRIP ══════════════════════════════════════════════════════════ -->
+  <div id="step-1" class="step-panel">
+    <div class="card">
+      <h2>Step 1 — Trip Configuration</h2>
+
+      <button class="info-toggle" id="overview-toggle" onclick="toggleModelOverview()">ℹ Model overview ▼</button>
+      <div class="model-overview" id="model-overview">
+        <img src="/static/diagram.png" style="width:100%;display:block">
+      </div>
+
+      <!-- Active trip card -->
+      <div class="selected-section">
+        <div class="selected-section-title">Active trip</div>
+        <div id="trip-active-card"><p class="empty-msg">No trip loaded.</p></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" data-context="trip" data-tab="existing" onclick="switchTab('trip','existing')">Choose existing</button>
+        <button class="tab-btn"        data-context="trip" data-tab="new"      onclick="switchTab('trip','new')">Customize &amp; save</button>
+      </div>
+
+      <!-- Tab: existing -->
+      <div class="tab-panel active" data-context="trip" data-tab="existing">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">Select a trip file to load its configuration.</p>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select id="trip-select" style="flex:1"></select>
+          <button class="btn btn-secondary btn-sm" onclick="reloadTripFromFile()" title="Reset to file values">↺ Reload</button>
+        </div>
+      </div>
+
+      <!-- Tab: customize & save -->
+      <div class="tab-panel" data-context="trip" data-tab="new">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">
+          Edit values below then save as a new trip file. All fields are required.
+        </p>
+        <div id="trip-editor"></div>
+        <div style="display:flex;gap:0.5rem;align-items:flex-end;margin-top:1rem">
+          <div style="flex:1">
+            <label>New trip name <span class="req">*</span> (saved as &lt;name&gt;_custom.json)</label>
+            <input type="text" id="trip-custom-name" placeholder="e.g. city_centre">
+          </div>
+          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="saveCustomTrip()">Save as custom trip</button>
+          <span class="save-msg" id="trip-save-msg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <span></span>
+      <button class="btn btn-primary" onclick="goToStep(2)">Next: Personas →</button>
+    </div>
+  </div>
+
+  <!-- ══ STEP 2: PERSONAS ══════════════════════════════════════════════════════ -->
+  <div id="step-2" class="step-panel" style="display:none">
+    <div class="card">
+      <h2>Step 2 — Personas</h2>
+
+      <div class="selected-section">
+        <div class="selected-section-title">Selected for this run</div>
+        <div class="selected-list" id="persona-selected">
+          <p class="empty-msg" id="persona-empty-msg">No personas selected yet.</p>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-context="persona" data-tab="existing" onclick="switchTab('persona','existing')">Choose existing</button>
+        <button class="tab-btn"        data-context="persona" data-tab="new"      onclick="switchTab('persona','new')">Create new</button>
+      </div>
+
+      <div class="tab-panel active" data-context="persona" data-tab="existing">
+        <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.6rem">
+          <p style="font-size:0.78rem;color:#666;flex:1;margin:0">Click a persona to add or remove it from the run.</p>
+          <button class="btn btn-secondary btn-sm" onclick="selectAllPersonas()">Select all</button>
+        </div>
+        <div class="checkbox-list" id="persona-pills"></div>
+      </div>
+
+      <div class="tab-panel" data-context="persona" data-tab="new">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">
+          Fill in all fields and click <strong>Save &amp; Add to run</strong>.
+        </p>
+        <div class="field-row" style="margin-bottom:0.7rem">
+          <label>Start from existing (optional)</label>
+          <select id="persona-base-select" onchange="loadPersonaBase()" style="width:100%">
+            <option value="">— blank template —</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Persona name <span class="req">*</span> (saved as &lt;name&gt;_custom.json)</label>
+          <input type="text" id="persona-custom-name" placeholder="e.g. commuter">
+        </div>
+        <div id="persona-editor"></div>
+        <div style="display:flex;gap:0.6rem;align-items:center;margin-top:0.8rem">
+          <button class="btn btn-primary btn-sm" onclick="addCustomPersona()">Save &amp; Add to run</button>
+          <span class="save-msg" id="persona-save-msg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-secondary" onclick="goToStep(1)">← Back</button>
+      <button class="btn btn-primary"   onclick="goToStep(3)">Next: Scenarios →</button>
+    </div>
+  </div>
+
+  <!-- ══ STEP 3: SCENARIOS ═════════════════════════════════════════════════════ -->
+  <div id="step-3" class="step-panel" style="display:none">
+    <div class="card">
+      <h2>Step 3 — Scenarios</h2>
+
+      <div class="selected-section">
+        <div class="selected-section-title">Selected for this run</div>
+        <div class="selected-list" id="scenario-selected">
+          <p class="empty-msg" id="scenario-empty-msg">No scenarios selected yet.</p>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" data-context="scenario" data-tab="existing" onclick="switchTab('scenario','existing')">Choose existing</button>
+        <button class="tab-btn"        data-context="scenario" data-tab="new"      onclick="switchTab('scenario','new')">Create new</button>
+      </div>
+
+      <div class="tab-panel active" data-context="scenario" data-tab="existing">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">Click a scenario to add or remove it from the run.</p>
+        <div class="checkbox-list" id="scenario-pills"></div>
+      </div>
+
+      <div class="tab-panel" data-context="scenario" data-tab="new">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">
+          Fill in all fields and click <strong>Save &amp; Add to run</strong>.
+        </p>
+        <div class="field-row" style="margin-bottom:0.7rem">
+          <label>Start from existing (optional)</label>
+          <select id="scenario-base-select" onchange="loadScenarioBase()" style="width:100%">
+            <option value="">— blank template —</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Scenario name <span class="req">*</span> (saved as &lt;name&gt;_custom.json)</label>
+          <input type="text" id="scenario-custom-name" placeholder="e.g. medium_disruption">
+        </div>
+        <div id="scenario-editor"></div>
+        <div style="display:flex;gap:0.6rem;align-items:center;margin-top:0.8rem">
+          <button class="btn btn-primary btn-sm" onclick="addCustomScenario()">Save &amp; Add to run</button>
+          <span class="save-msg" id="scenario-save-msg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-secondary" onclick="goToStep(2)">← Back</button>
+      <button class="btn btn-primary"   onclick="goToStep(4)">Next: Configuration →</button>
+    </div>
+  </div>
+
+  <!-- ══ STEP 4: CONFIG ════════════════════════════════════════════════════════ -->
+  <div id="step-4" class="step-panel" style="display:none">
+    <div class="card">
+      <h2>Step 4 — Configuration</h2>
+
+      <h3>DfT Emission Factors</h3>
+      <p style="font-size:0.8rem;color:#666;margin-bottom:1rem">Pre-filled from <code>dft_factors.json</code> (UK DfT 2025). Edit if needed.</p>
+      <div id="factors-editor"></div>
+
+      <h3 style="margin-top:1.5rem">Policy constraints</h3>
+      <p style="font-size:0.8rem;color:#666;margin-bottom:0.8rem">Enable or disable which policies the manager is allowed to choose. Disable all but one to test an isolated policy effect.</p>
+      <div id="policy-editor"></div>
+
+      <div style="margin-top:1.2rem;padding:0.8rem 1rem;background:#f0f4ff;border-radius:8px;border:1px solid #c7d2fe">
+        <div style="display:flex;align-items:center;gap:0.7rem;margin-bottom:0.5rem">
+          <input type="checkbox" id="policy-loop-toggle" onchange="snapshotPolicy()" style="width:16px;height:16px;cursor:pointer">
+          <strong style="font-size:0.9rem">Loop on policies</strong>
+        </div>
+        <p style="font-size:0.77rem;color:#555;margin:0;line-height:1.5">
+          <strong>Without loop</strong> — PRISM's manager chooses the best policy among the ones enabled above.<br>
+          <strong>With loop</strong> — runs once per policy with only that policy active, isolating each policy's effect on the selected personas.
+        </p>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-secondary" onclick="goToStep(3)">← Back</button>
+      <button class="btn btn-primary"   onclick="goToStep(5)">Next: Fares →</button>
+    </div>
+  </div>
+
+  <!-- ══ STEP 5: FARES ══════════════════════════════════════════════════════════ -->
+  <div id="step-5" class="step-panel" style="display:none">
+    <div class="card">
+      <h2>Step 5 — Fares</h2>
+
+      <!-- Active fares card -->
+      <div class="selected-section">
+        <div class="selected-section-title">Active fares</div>
+        <div id="fares-active-card"><p class="empty-msg">No fares loaded.</p></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" data-context="fares" data-tab="existing" onclick="switchTab('fares','existing')">Choose existing</button>
+        <button class="tab-btn"        data-context="fares" data-tab="new"      onclick="switchTab('fares','new')">Customize &amp; save</button>
+      </div>
+
+      <!-- Tab: existing -->
+      <div class="tab-panel active" data-context="fares" data-tab="existing">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">Select a fares file. Values are in pence.</p>
+        <select id="fares-select" onchange="loadFares()"></select>
+      </div>
+
+      <!-- Tab: customize & save -->
+      <div class="tab-panel" data-context="fares" data-tab="new">
+        <p style="font-size:0.78rem;color:#666;margin-bottom:0.8rem">
+          Edit values then save as a new fares file. All fields are required.
+        </p>
+        <div id="fares-editor"></div>
+        <div style="display:flex;gap:0.5rem;align-items:flex-end;margin-top:1rem">
+          <div style="flex:1">
+            <label>New fares name <span class="req">*</span> (saved as &lt;name&gt;_custom_fares.json)</label>
+            <input type="text" id="fares-custom-name" placeholder="e.g. subsidised_route">
+          </div>
+          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="saveCustomFares()">Save as custom fares</button>
+          <span class="save-msg" id="fares-save-msg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-secondary" onclick="goToStep(4)">← Back</button>
+      <button class="btn btn-primary"   onclick="goToStep(6)">Next: Properties →</button>
+    </div>
+  </div>
+
+  <!-- ══ STEP 6: PROPERTIES ════════════════════════════════════════════════════ -->
+  <div id="step-6" class="step-panel" style="display:none">
+    <div class="card">
+      <h2>Step 6 — Properties</h2>
+
+      <!-- Selected properties summary -->
+      <div class="selected-section">
+        <div class="selected-section-title">Selected for this run</div>
+        <div id="props-active-card"><p class="empty-msg">No properties selected.</p></div>
+      </div>
+
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="selectAllProps()">Select all</button>
+        <button class="btn btn-secondary btn-sm" onclick="selectNoneProps()">Deselect all</button>
+      </div>
+      <table class="props-table">
+        <thead><tr><th style="width:32px"></th><th style="width:28px">#</th><th>Description</th><th>Formula</th></tr></thead>
+        <tbody id="props-tbody"></tbody>
+      </table>
+    </div>
+    <div class="nav-row">
+      <button class="btn btn-secondary" onclick="goToStep(5)">← Back</button>
+      <div style="display:flex;gap:0.6rem;align-items:center">
+        <div style="display:flex;flex-direction:column;align-items:flex-start;gap:0.3rem">
+          <button class="btn btn-secondary" id="export-dot-btn" onclick="exportDot()">⬡ Export DOT</button>
+          <span id="export-dot-msg" style="font-size:0.72rem;max-width:220px;line-height:1.4"></span>
+        </div>
+        <button class="btn btn-primary" id="run-btn" onclick="startRun()">▶ Run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ RESULTS ════════════════════════════════════════════════════════════════ -->
+  <div id="results-panel">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem">
+        <h2 style="margin:0">Results</h2>
+        <button class="btn btn-secondary btn-sm" onclick="resetToWizard()">← New run</button>
+      </div>
+      <div id="overall-status" class="overall-progress"></div>
+      <div id="run-blocks"></div>
+    </div>
+  </div>
+
+  </div><!-- /wizard-main -->
+
+  <!-- ══ RUN SUMMARY SIDEBAR ══════════════════════════════════════════════ -->
+  <div class="wizard-sidebar" id="wizard-sidebar">
+    <div class="summary-card">
+      <div class="summary-title">Run summary</div>
+      <div class="summary-row active" id="sum-row-1" onclick="goToStep(1)">
+        <span class="sum-label">Trip</span>
+        <span class="sum-val empty" id="sum-trip">—</span>
+      </div>
+      <div class="summary-row" id="sum-row-2" onclick="goToStep(2)">
+        <span class="sum-label">Personas</span>
+        <span class="sum-val empty" id="sum-personas">—</span>
+      </div>
+      <div class="summary-row" id="sum-row-3" onclick="goToStep(3)">
+        <span class="sum-label">Scenarios</span>
+        <span class="sum-val empty" id="sum-scenarios">—</span>
+      </div>
+      <div class="summary-row" id="sum-row-4" onclick="goToStep(4)">
+        <span class="sum-label">Configuration</span>
+        <span class="sum-val empty" id="sum-factors">—</span>
+      </div>
+      <div class="summary-row" id="sum-row-5" onclick="goToStep(5)">
+        <span class="sum-label">Fares</span>
+        <span class="sum-val empty" id="sum-fares">—</span>
+      </div>
+      <div class="summary-row" id="sum-row-6" onclick="goToStep(6)">
+        <span class="sum-label">Properties</span>
+        <span class="sum-val empty" id="sum-props">—</span>
+      </div>
+    </div>
+  </div><!-- /wizard-sidebar -->
+
+</div><!-- /app-layout -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+const POLICY_LOOP_CONFIGS = [
+  { key: 'ALLOW_NORMAL',             label: 'Normal (no intervention)' },
+  { key: 'ALLOW_HIGH_FREQ',          label: 'High frequency service' },
+  { key: 'ALLOW_LOW_FARE',           label: 'Low fare subsidy' },
+  { key: 'ALLOW_ROAD_CHARGE',        label: 'Road charge surcharge' },
+  { key: 'ALLOW_ACCESSIBLE_SERVICE', label: 'Accessible service' },
+];
+
+const state = {
+  currentStep:       1,
+  tripData:          null,
+  faresData:         null,
+  factorsData:       null,
+  policyData:        null,
+  policyLoop:        false,
+  selectedPersonas:  [],
+  selectedScenarios: [],
+  allProps:          [],
+  runResults:        [],
+};
+
+const _initialized = {};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════════════════════════════════════
+function goToStep(n) {
+  if (n > state.currentStep) {
+    if (state.currentStep === 2 && state.selectedPersonas.length === 0) {
+      alert('Please select or add at least one persona.'); return;
+    }
+    if (state.currentStep === 3 && state.selectedScenarios.length === 0) {
+      alert('Please select or add at least one scenario.'); return;
+    }
+  }
+  if (state.currentStep === 1) snapshotTrip();
+  if (state.currentStep === 4) {
+    snapshotFactors(); snapshotPolicy();
+    if (n > 4 && state.policyData && Object.values(state.policyData).every(v => v === false)) {
+      alert('At least one policy must be enabled.'); return;
+    }
+  }
+  if (state.currentStep === 5) snapshotFares();
+
+  document.querySelectorAll('.step-panel').forEach(p => p.style.display = 'none');
+  document.getElementById(`step-${n}`).style.display = 'block';
+  document.querySelectorAll('.step-item').forEach(el => {
+    const s = parseInt(el.dataset.step);
+    el.classList.toggle('active', s === n);
+    el.classList.toggle('done',   s < n);
+  });
+  state.currentStep = n;
+  updateSummary();
+
+  // Lazy init
+  const inits = {
+    1: initTripStep, 2: initPersonaStep, 3: initScenarioStep,
+    4: initFactorsStep, 5: initFaresStep, 6: initPropsStep,
+  };
+  if (inits[n]) inits[n]();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Utilities
+// ═══════════════════════════════════════════════════════════════════════════
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+function numInput(id, label, value, step = 'any') {
+  return `<div class="field-row">
+    <label>${label}</label>
+    <input type="number" id="${id}" value="${value}" step="${step}">
+  </div>`;
+}
+
+function toggleRow(id, label, checked) {
+  return `<div class="toggle-row">
+    <span>${label}</span>
+    <label class="toggle">
+      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+      <span class="slider"></span>
+    </label>
+  </div>`;
+}
+
+function getVal(id) {
+  const el = document.getElementById(id);
+  if (!el) return undefined;
+  if (el.type === 'checkbox') return el.checked;
+  if (el.type === 'number')   return parseFloat(el.value);
+  return el.value;
+}
+
+// ── Validation ────────────────────────────────────────────────────────────────
+function requireName(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el || !el.value.trim()) {
+    el && el.classList.add('field-error');
+    el && el.focus();
+    alert('Name is required before saving.');
+    return false;
+  }
+  el.classList.remove('field-error');
+  return true;
+}
+
+function validateNumericFields(containerEl) {
+  let valid = true;
+  containerEl.querySelectorAll('input[type="number"]').forEach(el => {
+    const v = el.value.trim();
+    if (v === '' || isNaN(parseFloat(v))) {
+      el.classList.add('field-error');
+      valid = false;
+    } else {
+      el.classList.remove('field-error');
+    }
+  });
+  if (!valid) alert('All numeric fields are required and must be valid numbers.');
+  return valid;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tabs
+// ═══════════════════════════════════════════════════════════════════════════
+function switchTab(context, tabName) {
+  document.querySelectorAll(`.tab-btn[data-context="${context}"]`).forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.tab === tabName)
+  );
+  document.querySelectorAll(`.tab-panel[data-context="${context}"]`).forEach(panel =>
+    panel.classList.toggle('active', panel.dataset.tab === tabName)
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Expandable cards — multi-select (personas / scenarios)
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleExpand(context, name) {
+  const body = document.getElementById(`detail-${context}-${name}`);
+  const btn  = document.getElementById(`expand-btn-${context}-${name}`);
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? '▲' : '▼';
+}
+
+function renderSelectedItem(context, data) {
+  const name = data.name;
+  const rows = Object.entries(data)
+    .filter(([k]) => k !== 'name')
+    .map(([k, v]) => {
+      let cls = 'val-num', str = String(v);
+      if (v === true)  { cls = 'val-true';  str = 'true'; }
+      if (v === false) { cls = 'val-false'; str = 'false'; }
+      return `<div class="val-row"><span class="val-key">${k}</span><span class="${cls}">${str}</span></div>`;
+    }).join('');
+
+  const removeFn = `remove${context.charAt(0).toUpperCase()}${context.slice(1)}`;
+
+  return `<div class="sel-item" id="sel-${context}-${name}">
+    <div class="sel-item-header">
+      <span class="sel-item-name">${name}</span>
+      <div class="sel-item-actions">
+        <button class="expand-btn" id="expand-btn-${context}-${name}"
+                onclick="toggleExpand('${context}','${name}')">▼</button>
+        <span class="remove-btn" onclick="${removeFn}('${name}')">×</span>
+      </div>
+    </div>
+    <div class="sel-item-body" id="detail-${context}-${name}">
+      <div class="val-grid">${rows}</div>
+    </div>
+  </div>`;
+}
+
+function updateSelectedList(context, items) {
+  const listEl = document.getElementById(`${context}-selected`);
+  if (items.length === 0) {
+    listEl.innerHTML = `<p class="empty-msg">No ${context}s selected yet.</p>`;
+    return;
+  }
+  listEl.innerHTML = items.map(d => renderSelectedItem(context, d)).join('');
+}
+
+// ── Single active card (trip / fares / props) ─────────────────────────────────
+function renderActiveCard(containerId, title, flatData) {
+  const el = document.getElementById(containerId);
+  const rows = Object.entries(flatData).map(([k, v]) => {
+    let cls = 'val-num', str = String(v);
+    if (v === true)  { cls = 'val-true';  str = 'true'; }
+    if (v === false) { cls = 'val-false'; str = 'false'; }
+    return `<div class="val-row"><span class="val-key">${k}</span><span class="${cls}">${str}</span></div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="sel-item">
+    <div class="sel-item-header">
+      <span class="sel-item-name">${title}</span>
+      <div class="sel-item-actions">
+        <button class="expand-btn" id="expand-btn-active-${containerId}"
+                onclick="toggleActiveExpand('${containerId}')">▼</button>
+      </div>
+    </div>
+    <div class="sel-item-body" id="detail-active-${containerId}">
+      <div class="val-grid">${rows}</div>
+    </div>
+  </div>`;
+}
+
+function toggleActiveExpand(containerId) {
+  const body = document.getElementById(`detail-active-${containerId}`);
+  const btn  = document.getElementById(`expand-btn-active-${containerId}`);
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? '▲' : '▼';
+}
+
+// Generic deep-flattener: nested objects become "parent.child" keys
+function flattenObject(obj, prefix) {
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'name' || k.startsWith('_')) continue;
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      Object.assign(result, flattenObject(v, key));
+    } else {
+      result[key] = v;
+    }
+  }
+  return result;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 1 — Trip
+// ═══════════════════════════════════════════════════════════════════════════
+async function initTripStep() {
+  if (_initialized.trip) return;
+  _initialized.trip = true;
+
+  const trips = await api('/api/trips');
+  const sel   = document.getElementById('trip-select');
+  sel.innerHTML = trips.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  sel.addEventListener('change', async () => {
+    if (!sel.value) return;
+    const data = await api(`/api/trips/${sel.value}`);
+    renderTripEditor(data);
+    state.tripData = data;
+    renderActiveCard('trip-active-card', sel.value, flattenObject(data));
+    updateSummary();
+  });
+
+  if (trips.length > 0) {
+    sel.value = trips[0];
+    sel.dispatchEvent(new Event('change'));
+  }
+}
+
+async function reloadTripFromFile() {
+  const sel = document.getElementById('trip-select');
+  if (!sel.value) return;
+  const data = await api(`/api/trips/${sel.value}`);
+  renderTripEditor(data);
+  state.tripData = data;
+  renderActiveCard('trip-active-card', sel.value, flattenObject(data));
+  updateSummary();
+}
+
+function renderTripEditor(data) {
+  const seg        = data.segments || {};
+  const stopModes  = data.available_modes_from_stop        || { bus: true, rail: true };
+  const finalModes = data.available_modes_from_interchange || { bus: true, rail: false };
+
+  const segBlock = (key, label, hasWeather) => {
+    const s = seg[key] || {};
+    const inner = hasWeather
+      ? (() => { const t = s.time_min || {};
+          return `<div class="grid-3">
+            ${numInput(`seg_${key}_dist`,   'Distance (km)',    s.dist_km || 0)}
+            ${numInput(`seg_${key}_clear`,  'Time clear (min)', t.clear   || 0, 1)}
+            ${numInput(`seg_${key}_rain`,   'Time rain (min)',  t.rain    || 0, 1)}
+            ${numInput(`seg_${key}_severe`, 'Time severe (min)',t.severe  || 0, 1)}
+          </div>`; })()
+      : `<div class="grid-2">
+          ${numInput(`seg_${key}_dist`, 'Distance (km)', s.dist_km  || 0)}
+          ${numInput(`seg_${key}_time`, 'Time (min)',    s.time_min || 0, 1)}
+        </div>`;
+    return `<div class="segment-block"><h4>${label}</h4>${inner}</div>`;
+  };
+
+  document.getElementById('trip-editor').innerHTML = `
+    <h3>Mode availability</h3>
+    <div class="grid-2" style="margin-bottom:1rem">
+      <div>
+        <label style="font-weight:600;margin-bottom:0.4rem;display:block">From stop</label>
+        ${toggleRow('has_bus_stop',  'Bus available',  stopModes.bus)}
+        ${toggleRow('has_rail_stop', 'Rail available', stopModes.rail)}
+      </div>
+      <div>
+        <label style="font-weight:600;margin-bottom:0.4rem;display:block">From interchange</label>
+        ${toggleRow('has_bus_final',  'Bus available',  finalModes.bus)}
+        ${toggleRow('has_rail_final', 'Rail available', finalModes.rail)}
+      </div>
+    </div>
+    <h3>Segments</h3>
+    ${segBlock('walk_to_stop',             'Walk: home → stop',               false)}
+    ${segBlock('car_direct',               'Car: direct',                     true)}
+    ${segBlock('taxi_direct',              'Taxi: direct',                    true)}
+    ${segBlock('taxi_from_stop',           'Taxi: from stop',                 true)}
+    ${segBlock('taxi_final_leg',           'Taxi: final leg',                 true)}
+    ${segBlock('bus_stop_to_interchange',  'Bus: stop → interchange',         false)}
+    ${segBlock('rail_stop_to_interchange', 'Rail: stop → interchange',        false)}
+    ${segBlock('bus_interchange_to_dest',  'Bus: interchange → destination',  false)}
+    ${segBlock('rail_interchange_to_dest', 'Rail: interchange → destination', false)}
+    ${segBlock('walk_interchange_to_dest', 'Walk: interchange → destination', false)}
+    ${segBlock('bike_direct',              'Bike: direct',                    false)}
+    ${segBlock('walk_direct',              'Walk: direct (home → dest)',       false)}
+  `;
+}
+
+function snapshotTrip() {
+  const readSeg = (key, hasWeather) => hasWeather
+    ? { dist_km: getVal(`seg_${key}_dist`),
+        time_min: { clear: getVal(`seg_${key}_clear`), rain: getVal(`seg_${key}_rain`), severe: getVal(`seg_${key}_severe`) } }
+    : { dist_km: getVal(`seg_${key}_dist`), time_min: getVal(`seg_${key}_time`) };
+
+  state.tripData = {
+    _corridor: document.getElementById('trip-select')?.value || 'custom',
+    available_modes_from_stop:        { bus: getVal('has_bus_stop'),  rail: getVal('has_rail_stop') },
+    available_modes_from_interchange: { bus: getVal('has_bus_final'), rail: getVal('has_rail_final') },
+    segments: {
+      walk_to_stop:              readSeg('walk_to_stop',             false),
+      car_direct:                readSeg('car_direct',               true),
+      taxi_direct:               readSeg('taxi_direct',              true),
+      taxi_from_stop:            readSeg('taxi_from_stop',           true),
+      taxi_final_leg:            readSeg('taxi_final_leg',           true),
+      bus_stop_to_interchange:   readSeg('bus_stop_to_interchange',  false),
+      rail_stop_to_interchange:  readSeg('rail_stop_to_interchange', false),
+      bus_interchange_to_dest:   readSeg('bus_interchange_to_dest',  false),
+      rail_interchange_to_dest:  readSeg('rail_interchange_to_dest', false),
+      walk_interchange_to_dest:  readSeg('walk_interchange_to_dest', false),
+      bike_direct:               readSeg('bike_direct',              false),
+      walk_direct:               readSeg('walk_direct',              false),
+    }
+  };
+}
+
+async function saveCustomTrip() {
+  if (!requireName('trip-custom-name')) return;
+  const editorEl = document.getElementById('trip-editor');
+  if (!validateNumericFields(editorEl)) return;
+
+  snapshotTrip();
+  const name = document.getElementById('trip-custom-name').value.trim();
+  state.tripData.name = name;
+  await api('/api/save-trip', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(state.tripData) });
+  const savedName = name + '_custom';
+  document.getElementById('trip-save-msg').textContent = `Saved as ${savedName}.json ✓`;
+
+  // Refresh dropdown and set saved file as selected
+  const trips = await api('/api/trips');
+  const sel   = document.getElementById('trip-select');
+  sel.innerHTML = trips.map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.value = savedName;
+
+  // Update active card
+  renderActiveCard('trip-active-card', savedName, flattenObject(state.tripData));
+  updateSummary();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 2 — Personas
+// ═══════════════════════════════════════════════════════════════════════════
+async function initPersonaStep() {
+  if (_initialized.persona) { renderPersonaPills(await api('/api/personas')); return; }
+  _initialized.persona = true;
+  const [names, template] = await Promise.all([api('/api/personas'), api('/api/templates/persona')]);
+  renderPersonaPills(names);
+  renderPersonaEditor(template);
+  const baseSel = document.getElementById('persona-base-select');
+  baseSel.innerHTML = '<option value="">— blank template —</option>' +
+    names.map(n => `<option value="${n}">${n}</option>`).join('');
+}
+
+async function loadPersonaBase() {
+  const name = document.getElementById('persona-base-select').value;
+  const data = name ? await api(`/api/personas/${name}`) : await api('/api/templates/persona');
+  renderPersonaEditor(data);
+}
+
+function renderPersonaPills(names) {
+  document.getElementById('persona-pills').innerHTML = names.map(n => {
+    const isSelected = !!state.selectedPersonas.find(p => p.name === n);
+    return `<label class="checkbox-pill ${isSelected ? 'selected' : ''}" data-name="${n}">
+      <input type="checkbox" value="${n}" ${isSelected ? 'checked' : ''} onchange="togglePersona('${n}', this.checked)">
+      ${n}
+    </label>`;
+  }).join('');
+}
+
+function renderPersonaEditor(data) {
+  const boolKeys = Object.entries(data).filter(([k, v]) => typeof v === 'boolean' && k !== 'name');
+  const numKeys  = Object.entries(data).filter(([k, v]) => typeof v === 'number');
+  document.getElementById('persona-editor').innerHTML = `
+    <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.5rem">
+      ${boolKeys.map(([k, v]) => toggleRow(`pcustom_${k}`, k, v)).join('')}
+      <div class="grid-2" style="margin-top:0.8rem">
+        ${numKeys.map(([k, v]) => numInput(`pcustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1)).join('')}
+      </div>
+    </div>`;
+}
+
+async function togglePersona(name, checked) {
+  const pill = document.querySelector(`#persona-pills .checkbox-pill[data-name="${name}"]`);
+  if (pill) pill.classList.toggle('selected', checked);
+  if (checked) {
+    if (!state.selectedPersonas.find(p => p.name === name)) {
+      const data = await api(`/api/personas/${name}`);
+      state.selectedPersonas.push(data);
+    }
+  } else {
+    state.selectedPersonas = state.selectedPersonas.filter(p => p.name !== name);
+  }
+  updateSelectedList('persona', state.selectedPersonas);
+  updateSummary(); updateExportDotBtn();
+}
+
+function removePersona(name) {
+  state.selectedPersonas = state.selectedPersonas.filter(p => p.name !== name);
+  const pill = document.querySelector(`#persona-pills .checkbox-pill[data-name="${name}"]`);
+  if (pill) { pill.classList.remove('selected'); const cb = pill.querySelector('input'); if (cb) cb.checked = false; }
+  updateSelectedList('persona', state.selectedPersonas);
+  updateSummary(); updateExportDotBtn();
+}
+
+async function addCustomPersona() {
+  if (!requireName('persona-custom-name')) return;
+  const editorEl = document.getElementById('persona-editor');
+  if (!validateNumericFields(editorEl)) return;
+
+  const name = document.getElementById('persona-custom-name').value.trim();
+  const tpl  = await api('/api/templates/persona');
+  const data = { name };
+  Object.entries(tpl).forEach(([k, v]) => {
+    if (k === 'name') return;
+    const val = getVal(`pcustom_${k}`);
+    data[k] = val !== undefined ? val : v;
+  });
+
+  await api('/api/save-persona', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+
+  const savedName = name + '_custom';
+  data.name = savedName;
+  if (!state.selectedPersonas.find(p => p.name === savedName))
+    state.selectedPersonas.push({ ...data });
+  updateSelectedList('persona', state.selectedPersonas);
+  updateSummary(); updateExportDotBtn();
+
+  document.getElementById('persona-save-msg').textContent = `Saved & added: ${savedName} ✓`;
+  document.getElementById('persona-custom-name').value = '';
+
+  const names = await api('/api/personas');
+  renderPersonaPills(names);
+}
+
+async function selectAllPersonas() {
+  const pills = document.querySelectorAll('#persona-pills .checkbox-pill');
+  for (const pill of pills) {
+    const name = pill.dataset.name;
+    const cb = pill.querySelector('input');
+    if (cb && !cb.checked) {
+      cb.checked = true;
+      await togglePersona(name, true);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 3 — Scenarios
+// ═══════════════════════════════════════════════════════════════════════════
+async function initScenarioStep() {
+  if (_initialized.scenario) { renderScenarioPills(await api('/api/scenarios')); return; }
+  _initialized.scenario = true;
+  const [names, template] = await Promise.all([api('/api/scenarios'), api('/api/templates/scenario')]);
+  renderScenarioPills(names);
+  renderScenarioEditor(template);
+  const baseSel = document.getElementById('scenario-base-select');
+  baseSel.innerHTML = '<option value="">— blank template —</option>' +
+    names.map(n => `<option value="${n}">${n}</option>`).join('');
+}
+
+async function loadScenarioBase() {
+  const name = document.getElementById('scenario-base-select').value;
+  const data = name ? await api(`/api/scenarios/${name}`) : await api('/api/templates/scenario');
+  renderScenarioEditor(data);
+}
+
+function renderScenarioPills(names) {
+  document.getElementById('scenario-pills').innerHTML = names.map(n => {
+    const isSelected = !!state.selectedScenarios.find(s => s.name === n);
+    return `<label class="checkbox-pill ${isSelected ? 'selected' : ''}" data-name="${n}">
+      <input type="checkbox" value="${n}" ${isSelected ? 'checked' : ''} onchange="toggleScenario('${n}', this.checked)">
+      ${n}
+    </label>`;
+  }).join('');
+}
+
+function renderScenarioEditor(data) {
+  const numKeys = Object.entries(data).filter(([k, v]) => typeof v === 'number');
+  document.getElementById('scenario-editor').innerHTML = `
+    <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.5rem">
+      <div class="grid-2">
+        ${numKeys.map(([k, v]) => numInput(`scustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1)).join('')}
+      </div>
+    </div>`;
+}
+
+async function toggleScenario(name, checked) {
+  const pill = document.querySelector(`#scenario-pills .checkbox-pill[data-name="${name}"]`);
+  if (pill) pill.classList.toggle('selected', checked);
+  if (checked) {
+    if (!state.selectedScenarios.find(s => s.name === name)) {
+      const data = await api(`/api/scenarios/${name}`);
+      state.selectedScenarios.push(data);
+    }
+  } else {
+    state.selectedScenarios = state.selectedScenarios.filter(s => s.name !== name);
+  }
+  updateSelectedList('scenario', state.selectedScenarios);
+  updateSummary(); updateExportDotBtn();
+}
+
+function removeScenario(name) {
+  state.selectedScenarios = state.selectedScenarios.filter(s => s.name !== name);
+  const pill = document.querySelector(`#scenario-pills .checkbox-pill[data-name="${name}"]`);
+  if (pill) { pill.classList.remove('selected'); const cb = pill.querySelector('input'); if (cb) cb.checked = false; }
+  updateSelectedList('scenario', state.selectedScenarios);
+  updateSummary(); updateExportDotBtn();
+}
+
+async function addCustomScenario() {
+  if (!requireName('scenario-custom-name')) return;
+  const editorEl = document.getElementById('scenario-editor');
+  if (!validateNumericFields(editorEl)) return;
+
+  const name = document.getElementById('scenario-custom-name').value.trim();
+  const tpl  = await api('/api/templates/scenario');
+  const data = { name };
+  Object.entries(tpl).forEach(([k, v]) => {
+    if (k === 'name') return;
+    const val = getVal(`scustom_${k}`);
+    data[k] = val !== undefined ? val : v;
+  });
+
+  await api('/api/save-scenario', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+
+  const savedName = name + '_custom';
+  data.name = savedName;
+  if (!state.selectedScenarios.find(s => s.name === savedName))
+    state.selectedScenarios.push({ ...data });
+  updateSelectedList('scenario', state.selectedScenarios);
+  updateSummary(); updateExportDotBtn();
+
+  document.getElementById('scenario-save-msg').textContent = `Saved & added: ${savedName} ✓`;
+  document.getElementById('scenario-custom-name').value = '';
+
+  const names = await api('/api/scenarios');
+  renderScenarioPills(names);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 4 — DfT Factors
+// ═══════════════════════════════════════════════════════════════════════════
+async function initFactorsStep() {
+  if (_initialized.factors) return;
+  _initialized.factors = true;
+  const [factorsData, policyData] = await Promise.all([
+    api('/api/factors'),
+    api('/api/policy-config'),
+  ]);
+  state.factorsData = factorsData;
+  state.policyData  = policyData;
+  renderFactorsEditor(factorsData);
+  renderPolicyEditor(policyData);
+  updateSummary();
+}
+
+function renderPolicyEditor(data) {
+  const labels = {
+    ALLOW_NORMAL:             'Normal (no intervention)',
+    ALLOW_HIGH_FREQ:          'High frequency service',
+    ALLOW_LOW_FARE:           'Low fare subsidy',
+    ALLOW_ROAD_CHARGE:        'Road charge surcharge',
+    ALLOW_ACCESSIBLE_SERVICE: 'Accessible service',
+  };
+  document.getElementById('policy-editor').innerHTML =
+    `<div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff">
+      ${Object.entries(data).map(([k, v]) =>
+        toggleRow(`policy_${k}`, labels[k] || k, v)
+      ).join('')}
+    </div>`;
+}
+
+function snapshotPolicy() {
+  if (!state.policyData) return;
+  const updated = {};
+  Object.keys(state.policyData).forEach(k => {
+    const el = document.getElementById(`policy_${k}`);
+    updated[k] = el ? el.checked : state.policyData[k];
+  });
+  state.policyData = updated;
+  const loopEl = document.getElementById('policy-loop-toggle');
+  if (loopEl) state.policyLoop = loopEl.checked;
+}
+
+function renderFactorsEditor(data) {
+  const f = data.factors_g_per_pkm;
+  document.getElementById('factors-editor').innerHTML = `
+    <h3>Per-passenger-km (g CO₂e / pkm)</h3>
+    <div class="grid-2">
+      ${numInput('f_taxi',  'Taxi (g/pkm)',           f.taxi,          0.01)}
+      ${numInput('f_bus',   'Local bus (g/pkm)',       f.local_bus,     0.01)}
+      ${numInput('f_rail',  'National rail (g/pkm)',   f.national_rail, 0.01)}
+      ${numInput('f_active','Active modes (g/pkm)',    f.active,        0.01)}
+    </div>
+    <h3>Car</h3>
+    <div class="grid-2">
+      ${numInput('f_car', 'Car (g CO₂e / vkm)', data.car_g_per_vkm, 0.01)}
+    </div>`;
+}
+
+function snapshotFactors() {
+  if (!state.factorsData) return;
+  state.factorsData = {
+    ...state.factorsData,
+    factors_g_per_pkm: {
+      taxi:          getVal('f_taxi')   ?? state.factorsData.factors_g_per_pkm.taxi,
+      local_bus:     getVal('f_bus')    ?? state.factorsData.factors_g_per_pkm.local_bus,
+      national_rail: getVal('f_rail')   ?? state.factorsData.factors_g_per_pkm.national_rail,
+      active:        getVal('f_active') ?? state.factorsData.factors_g_per_pkm.active,
+    },
+    car_g_per_vkm: getVal('f_car') ?? state.factorsData.car_g_per_vkm,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 5 — Fares
+// ═══════════════════════════════════════════════════════════════════════════
+async function initFaresStep() {
+  if (_initialized.fares) return;
+  _initialized.fares = true;
+
+  const names = await api('/api/fares-list');
+  const sel   = document.getElementById('fares-select');
+  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+  await loadFares();
+}
+
+async function loadFares() {
+  const sel  = document.getElementById('fares-select');
+  const name = sel?.value;
+  if (!name) return;
+  const data = await api(`/api/fares/${name}`);
+  state.faresData = data;
+  renderFaresEditor(data);
+  renderActiveCard('fares-active-card', name, flattenObject(data));
+  updateSummary();
+}
+
+function renderFaresEditor(data) {
+  const b  = data.base_fares                          || {};
+  const lf = data.policy_overrides?.low_fare          || {};
+  const rc = data.policy_overrides?.road_charge       || {};
+  document.getElementById('fares-editor').innerHTML = `
+    <h3>Base fares</h3>
+    <div class="grid-2">
+      ${numInput('fare_bus',         'Bus (pence)',         b.bus          || 0, 1)}
+      ${numInput('fare_rail',        'Rail (pence)',        b.rail         || 0, 1)}
+      ${numInput('fare_taxi_direct', 'Taxi direct (pence)', b.taxi_direct  || 0, 1)}
+      ${numInput('fare_taxi_stop',   'Taxi from stop (p)',  b.taxi_stop    || 0, 1)}
+      ${numInput('fare_taxi_final',  'Taxi final leg (p)',  b.taxi_final   || 0, 1)}
+    </div>
+    <h3>Policy: Low fare (policy = 2)</h3>
+    <div class="grid-2">
+      ${numInput('fare_lf_bus',  'Bus subsidised (pence)',  lf.bus  || 0, 1)}
+      ${numInput('fare_lf_rail', 'Rail subsidised (pence)', lf.rail || 0, 1)}
+    </div>
+    <h3>Policy: Road charge surcharge (policy = 3)</h3>
+    <div class="grid-2">
+      ${numInput('fare_rc_surge', 'Surcharge on all taxis (pence)', rc.surcharge || 0, 1)}
+    </div>`;
+}
+
+function snapshotFares() {
+  if (!state.faresData) return;
+  state.faresData = {
+    ...state.faresData,
+    base_fares: {
+      bus:         getVal('fare_bus')         ?? 0,
+      rail:        getVal('fare_rail')        ?? 0,
+      taxi_direct: getVal('fare_taxi_direct') ?? 0,
+      taxi_stop:   getVal('fare_taxi_stop')   ?? 0,
+      taxi_final:  getVal('fare_taxi_final')  ?? 0,
+    },
+    policy_overrides: {
+      low_fare:    { bus: getVal('fare_lf_bus') ?? 0, rail: getVal('fare_lf_rail') ?? 0 },
+      road_charge: { surcharge: getVal('fare_rc_surge') ?? 0 },
+    }
+  };
+}
+
+async function saveCustomFares() {
+  if (!requireName('fares-custom-name')) return;
+  const editorEl = document.getElementById('fares-editor');
+  if (!validateNumericFields(editorEl)) return;
+
+  snapshotFares();
+  const name = document.getElementById('fares-custom-name').value.trim();
+  const body = { ...state.faresData, name };
+  await api('/api/save-fares', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const savedName = name + '_custom';
+  document.getElementById('fares-save-msg').textContent = `Saved as ${savedName}_fares.json ✓`;
+
+  // Refresh dropdown and set saved file as selected
+  const names = await api('/api/fares-list');
+  const sel   = document.getElementById('fares-select');
+  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+  sel.value = savedName;
+
+  // Update active card
+  renderActiveCard('fares-active-card', savedName, flattenObject(state.faresData));
+  updateSummary();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 6 — Properties
+// ═══════════════════════════════════════════════════════════════════════════
+async function initPropsStep() {
+  if (_initialized.props) { renderPropsSelectedCard(); return; }
+  _initialized.props = true;
+  state.allProps = await api('/api/props');
+  renderPropsTable();
+  renderPropsSelectedCard();
+}
+
+function renderPropsTable() {
+  document.getElementById('props-tbody').innerHTML = state.allProps.map(p => {
+    if (p.type === 'section') {
+      return `<tr class="section-row"><td colspan="4">${p.title}</td></tr>`;
+    }
+    return `<tr onclick="togglePropRow(event,${p.index})">
+      <td><input type="checkbox" class="prop-cb" value="${p.index}" checked onchange="renderPropsSelectedCard();updateSummary();updateExportDotBtn()"></td>
+      <td>${p.index}</td>
+      <td>${p.description}</td>
+      <td style="font-family:monospace;font-size:0.72rem;color:#666">${p.formula}</td>
+    </tr>`;
+  }).join('');
+  renderPropsSelectedCard();
+}
+
+function togglePropRow(event, index) {
+  if (event.target.type === 'checkbox') return;
+  const cb = document.querySelector(`.prop-cb[value="${index}"]`);
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  renderPropsSelectedCard();
+  updateSummary();
+  updateExportDotBtn();
+}
+
+function selectAllProps()  { document.querySelectorAll('.prop-cb').forEach(cb => cb.checked = true);  renderPropsSelectedCard(); updateSummary(); updateExportDotBtn(); }
+function selectNoneProps() { document.querySelectorAll('.prop-cb').forEach(cb => cb.checked = false); renderPropsSelectedCard(); updateSummary(); updateExportDotBtn(); }
+
+function renderPropsSelectedCard() {
+  const selected = [...document.querySelectorAll('.prop-cb:checked')]
+    .map(cb => state.allProps.find(x => x.index === parseInt(cb.value)))
+    .filter(Boolean);
+
+  const el = document.getElementById('props-active-card');
+  if (!el) return;
+
+  if (selected.length === 0) {
+    el.innerHTML = '<p class="empty-msg">No properties selected.</p>';
+    return;
+  }
+
+  const rows = selected.map(p =>
+    `<div class="val-row">
+      <span class="val-key" style="min-width:2rem">#${p.index}</span>
+      <span style="font-size:0.73rem;color:#555">${p.description}</span>
+    </div>`
+  ).join('');
+
+  el.innerHTML = `<div class="sel-item">
+    <div class="sel-item-header">
+      <span class="sel-item-name">${selected.length} / 52 properties selected</span>
+      <div class="sel-item-actions">
+        <button class="expand-btn" id="props-expand-btn" onclick="togglePropsExpand()">▼</button>
+      </div>
+    </div>
+    <div class="sel-item-body" id="props-detail">
+      <div style="display:flex;flex-direction:column;gap:0.25rem">${rows}</div>
+    </div>
+  </div>`;
+}
+
+function togglePropsExpand() {
+  const body = document.getElementById('props-detail');
+  const btn  = document.getElementById('props-expand-btn');
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? '▲' : '▼';
+}
+
+function getSelectedPropIndices() {
+  return [...document.querySelectorAll('.prop-cb:checked')].map(cb => parseInt(cb.value));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RUN
+// ═══════════════════════════════════════════════════════════════════════════
+function _streamRun(policyConfig, props, policyKey) {
+  return new Promise((resolve, reject) => {
+    fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trip:      state.tripData,
+        fares:     state.faresData,
+        factors:   state.factorsData,
+        policy:    policyConfig,
+        personas:  state.selectedPersonas,
+        scenarios: state.selectedScenarios,
+        props,
+      }),
+    }).then(resp => {
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      function pump() {
+        reader.read().then(({ done, value }) => {
+          if (done) { resolve(); return; }
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          lines.forEach(line => {
+            if (!line.startsWith('data: ')) return;
+            const ev = JSON.parse(line.slice(6));
+            if (policyKey) {
+              ev.run    = policyKey + '__' + ev.run;
+              ev.policy = policyKey;
+            }
+            handleSSE(ev, props);
+          });
+          pump();
+        });
+      }
+      pump();
+    }).catch(reject);
+  });
+}
+
+async function startRun() {
+  const props = getSelectedPropIndices();
+  if (props.length === 0) { alert('Select at least one property.'); return; }
+
+  snapshotTrip();
+  snapshotFactors();
+  snapshotPolicy();
+  snapshotFares();
+
+  document.querySelectorAll('.step-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('steps-bar').style.display = 'none';
+  document.getElementById('results-panel').style.display = 'block';
+  const sb = document.getElementById('wizard-sidebar'); if (sb) sb.style.display = 'none';
+
+  state.runResults = [];
+  const blocksEl = document.getElementById('run-blocks');
+  const statusEl = document.getElementById('overall-status');
+  blocksEl.innerHTML = '';
+
+  try {
+    if (state.policyLoop) {
+      const nP = state.selectedPersonas.length, nS = state.selectedScenarios.length;
+      statusEl.innerHTML = `<span class="spinner"></span> Policy loop — ${POLICY_LOOP_CONFIGS.length} policies × ${nP} persona(s) × ${nS} scenario(s)…`;
+      for (const { key, label } of POLICY_LOOP_CONFIGS) {
+        const policyConfig = Object.fromEntries(POLICY_LOOP_CONFIGS.map(p => [p.key, p.key === key]));
+        blocksEl.insertAdjacentHTML('beforeend', `<div class="policy-section-header">Policy: ${label}</div>`);
+        state.selectedPersonas.forEach(p => {
+          state.selectedScenarios.forEach(s => {
+            const runLabel = `${key}__${p.name}_${s.name}_transport_smg_transport_smg`;
+            blocksEl.insertAdjacentHTML('beforeend', buildRunBlock(runLabel, p.name, s.name, props));
+          });
+        });
+        await _streamRun(policyConfig, props, key);
+      }
+    } else {
+      const totalCombos = state.selectedPersonas.length * state.selectedScenarios.length;
+      statusEl.innerHTML = `<span class="spinner"></span> Running ${totalCombos} combination(s), ${props.length} properties each…`;
+      state.selectedPersonas.forEach(p => {
+        state.selectedScenarios.forEach(s => {
+          const label = `${p.name}_${s.name}_transport_smg_transport_smg`;
+          blocksEl.insertAdjacentHTML('beforeend', buildRunBlock(label, p.name, s.name, props));
+        });
+      });
+      await _streamRun(state.policyData, props, null);
+    }
+    openResultsInNewTab();
+    resetToWizard();
+  } catch(e) {
+    statusEl.innerHTML = `❌ Error: ${e.message}`;
+  }
+}
+
+function buildRunBlock(label, persona, scenario, propIndices) {
+  const rows = propIndices.map(i => {
+    const p = state.allProps.find(x => x.index === i);
+    return `<tr>
+      <td>${i}</td>
+      <td>${p ? p.description : ''}</td>
+      <td><span class="result-val pending" id="res_${label}_${i}">—</span></td>
+    </tr>`;
+  }).join('');
+  return `<div class="run-block" id="block_${label}">
+    <div class="run-title">
+      ${persona} <span style="color:#aaa">×</span> ${scenario}
+      <span class="badge">${propIndices.length} props</span>
+    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="pb_${label}"></div></div>
+    <table class="results-table">
+      <thead><tr><th>#</th><th>Property</th><th>Result</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function handleSSE(ev, propIndices) {
+  if (ev.type !== 'progress') return;
+  const { run, persona, scenario, prop_n, result, error, policy } = ev;
+  const resEl = document.getElementById(`res_${run}_${prop_n}`);
+  if (resEl) {
+    let cls = 'ok';
+    if (error || result === 'ERROR') cls = 'err';
+    else if (result === 'true')  cls = 'bool-true';
+    else if (result === 'false') cls = 'bool-false';
+    resEl.textContent = result;
+    resEl.className   = `result-val ${cls}`;
+  }
+  const done = document.querySelectorAll(`#block_${run} .result-val:not(.pending)`).length;
+  const pb   = document.getElementById(`pb_${run}`);
+  if (pb) pb.style.width = Math.round((done / propIndices.length) * 100) + '%';
+
+  const propMeta = state.allProps.find(x => x.index === prop_n);
+  state.runResults.push({
+    policy:      ev.policy   || '',
+    persona:     persona     || '',
+    scenario:    scenario    || '',
+    prop_index:  prop_n,
+    description: propMeta ? propMeta.description : '',
+    formula:     propMeta ? propMeta.formula      : '',
+    result,
+  });
+}
+
+function openResultsInNewTab() {
+  const blocksHTML  = document.getElementById('run-blocks').innerHTML;
+  const resultsJSON = JSON.stringify(state.runResults);
+  const timestamp   = new Date().toLocaleString();
+  const origin      = window.location.origin;
+
+  const css = `
+    body{font-family:system-ui,sans-serif;padding:2rem;background:#f7f8fc;color:#333;margin:0}
+    .container{max-width:1000px;margin:0 auto}
+    h1{font-size:1.3rem;margin-bottom:0.3rem}
+    .ts{font-size:0.8rem;color:#888;margin-bottom:1.5rem}
+    .run-block{background:white;border-radius:10px;padding:1.2rem 1.4rem;margin-bottom:1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+    .run-title{font-weight:700;font-size:0.95rem;margin-bottom:0.8rem;display:flex;align-items:center;gap:0.5rem}
+    .badge{background:#e8ecff;color:#4361ee;font-size:0.7rem;padding:2px 7px;border-radius:99px;font-weight:600}
+    .progress-bar-wrap{display:none}
+    .results-table{width:100%;border-collapse:collapse;font-size:0.8rem}
+    .results-table th{text-align:left;padding:.45rem .6rem;background:#f4f6fa;border-bottom:2px solid #dde1ec;color:#555}
+    .results-table td{padding:.4rem .6rem;border-bottom:1px solid #f0f0f0}
+    .result-val{font-weight:700}
+    .result-val.ok{color:#27ae60}
+    .result-val.err{color:#c0392b}
+    .result-val.bool-true{color:#27ae60}
+    .result-val.bool-false{color:#e67e22}
+    .result-val.pending{color:#aaa}
+    .policy-section-header{font-size:.85rem;font-weight:700;color:#4361ee;background:#eef0ff;border-radius:6px;padding:.4rem .8rem;margin:1.2rem 0 .6rem;letter-spacing:.02em}
+    .save-btn{padding:.5rem 1rem;background:#4361ee;color:white;border:none;border-radius:6px;cursor:pointer;font-size:.85rem}
+    .save-btn:hover{background:#3451d1}
+    .save-btn:disabled{background:#aaa;cursor:default}
+    #save-msg{font-size:.8rem;color:#555;margin-left:.8rem}
+  `;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Results — ${timestamp}</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div class="container">
+  <h1>Run Results</h1>
+  <p class="ts">Generated ${timestamp}</p>
+  <div style="margin-bottom:1.4rem">
+    <button class="save-btn" onclick="saveCSV(this)">⬇ Save CSV to results/exports/</button>
+    <span id="save-msg"></span>
+  </div>
+  <div id="run-blocks">${blocksHTML}</div>
+  </div>
+  <scr` + `ipt>
+    const runResults = ${resultsJSON};
+    const origin = '${origin}';
+    async function saveCSV(btn) {
+      btn.disabled = true; btn.textContent = 'Saving…';
+      const msg = document.getElementById('save-msg');
+      try {
+        const resp = await fetch(origin + '/api/export-csv', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ results: runResults }),
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        btn.textContent = '✓ Saved';
+        msg.textContent = 'results/exports/' + data.filename;
+      } catch(e) {
+        btn.textContent = '⬇ Save CSV'; btn.disabled = false;
+        msg.style.color = '#c0392b'; msg.textContent = '❌ ' + e.message;
+      }
+    }
+  <\/script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+function resetToWizard() {
+  document.getElementById('results-panel').style.display = 'none';
+  document.getElementById('steps-bar').style.display = 'flex';
+  const sb = document.getElementById('wizard-sidebar'); if (sb) sb.style.display = '';
+  goToStep(1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOT Export
+// ═══════════════════════════════════════════════════════════════════════════
+function updateExportDotBtn() {
+  // Nothing to update proactively — feedback is shown on click
+}
+
+async function exportDot() {
+  const props = getSelectedPropIndices();
+  const msg   = document.getElementById('export-dot-msg');
+  const nP = state.selectedPersonas.length;
+  const nS = state.selectedScenarios.length;
+  const nR = props.length;
+
+  if (nP !== 1 || nS !== 1 || nR !== 1) {
+    msg.style.color = '#dc2626';
+    msg.textContent = 'DOT export needs exactly 1 persona, 1 scenario and 1 property — you currently have '
+      + `${nP} persona(s), ${nS} scenario(s) and ${nR} propert${nR === 1 ? 'y' : 'ies'} selected.`;
+    return;
+  }
+
+  const btn = document.getElementById('export-dot-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Exporting…';
+  msg.textContent = '';
+
+  snapshotTrip(); snapshotFactors(); snapshotFares();
+
+  try {
+    const result = await api('/api/export-dot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trip:     state.tripData,
+        fares:    state.faresData,
+        factors:  state.factorsData,
+        policy:   state.policyData,
+        persona:  state.selectedPersonas[0],
+        scenario: state.selectedScenarios[0],
+        prop:     props[0],
+      }),
+    });
+    if (result.error) { alert('Export failed:\n' + result.error); return; }
+    window.open('https://dreampuf.github.io/GraphvizOnline/#' + encodeURIComponent(result.dot), '_blank');
+    msg.style.color = '#16a34a';
+    msg.textContent = 'Opened ✓';
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬡ Export DOT';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Model overview toggle
+// ═══════════════════════════════════════════════════════════════════════════
+function toggleModelOverview() {
+  const panel  = document.getElementById('model-overview');
+  const btn    = document.getElementById('overview-toggle');
+  if (!panel) return;
+  const isOpen = panel.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? 'ℹ Model overview ▲' : 'ℹ Model overview ▼';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Run summary sidebar
+// ═══════════════════════════════════════════════════════════════════════════
+function truncateNames(arr) {
+  if (!arr || arr.length === 0) return null;
+  return arr.map(x => x.name || String(x)).join('<br>');
+}
+
+function setSum(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (val) {
+    el.innerHTML = val;
+    el.className = 'sum-val';
+  } else {
+    el.innerHTML = '—';
+    el.className = 'sum-val empty';
+  }
+}
+
+function updateSummary() {
+  // Trip
+  const tripName = state.tripData
+    ? (state.tripData._corridor || state.tripData.name || 'loaded')
+    : null;
+  setSum('sum-trip', tripName);
+
+  // Personas
+  setSum('sum-personas', truncateNames(state.selectedPersonas));
+
+  // Scenarios
+  setSum('sum-scenarios', truncateNames(state.selectedScenarios));
+
+  // Factors
+  setSum('sum-factors', state.factorsData ? 'DfT 2025' : null);
+
+  // Fares
+  const faresSel = document.getElementById('fares-select');
+  setSum('sum-fares', state.faresData ? (faresSel?.value || 'loaded') : null);
+
+  // Props
+  const checkedCount = document.querySelectorAll('.prop-cb:checked').length;
+  setSum('sum-props', checkedCount > 0 ? `${checkedCount} / 52` : null);
+
+  // Highlight active step row
+  for (let i = 1; i <= 6; i++) {
+    const row = document.getElementById(`sum-row-${i}`);
+    if (row) row.classList.toggle('active', i === state.currentStep);
+  }
+}
+
+// Bootstrap
+goToStep(1);
+</script>
+</body>
+</html>

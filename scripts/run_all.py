@@ -27,14 +27,23 @@ parser.add_argument("--persona",    nargs="+")
 parser.add_argument("--model",      nargs="+")
 parser.add_argument("--props",      nargs="+", type=int)
 parser.add_argument("--scenario",   nargs="+")
-parser.add_argument("--props-file", default="reliability")
-parser.add_argument("--trip",  default="giffnock_glasgow",       help="Trip config name (params/trip/)")
-parser.add_argument("--fares", default="giffnock_glasgow_fares", help="Fares config name (params/fares/)")
-parser.add_argument("--exportstrat", action="store_true",        help="Export optimal strategy as .dot file")
+parser.add_argument("--props-file", default="transport_smg")
+parser.add_argument("--trip",          default="giffnock_glasgow",       help="Trip config name (params/trip/)")
+parser.add_argument("--fares",         default="giffnock_glasgow_fares", help="Fares config name (params/fares/)")
+parser.add_argument("--policy-config", default="policy_config",          help="Policy availability config (params/policy_config.json)")
+parser.add_argument("--exportstrat", action="store_true",                help="Export optimal strategy as .dot file")
 args = parser.parse_args()
 
 # Precompute trip constants (used only for transport_smg model)
 trip_consts_str = to_prism_const_string(get_trip_constants(trip=args.trip, fares=args.fares))
+
+# Load policy availability constants
+policy_config_path = f"{BASE}/params/{vars(args)['policy_config']}.json"
+policy_data = json.load(open(policy_config_path))
+policy_consts_str = ",".join(
+    f"{k}={'true' if v else 'false'}"
+    for k, v in policy_data.items()
+)
 
 # Defaults
 personas_to_run = args.persona or None   # None = all
@@ -105,7 +114,7 @@ for persona in personas:
                 scenario_tag = ""
 
             if model == "transport_smg":
-                consts = trip_consts_str + "," + consts
+                consts = trip_consts_str + "," + policy_consts_str + "," + consts
 
             run_label = f"{persona['name']}{scenario_tag}_{model}"
             print(f"\nRunning {run_label} ...")

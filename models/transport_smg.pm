@@ -17,8 +17,9 @@
 //   phase=1  persona acts per leg until done=true
 //
 // Key design choices:
-//   - Manager acts exactly once at phase=0 (12-branch sampling of weather x lift_ok x acc_bus)
-//   - set_accessible_service guarantees lift_ok=true and acc_bus=true (3 branches: weather only)
+//   - Manager acts exactly once at phase=0 (6-branch sampling of weather x acc_bus)
+//   - set_accessible_service guarantees acc_bus=true and halves LIFT_BREAK_PROB (3 branches: weather only)
+//   - Lift failure is an in-journey disruption embedded in board_rail/final_leg_rail probabilities
 //   - In-journey disruptions are probabilistic outcomes within persona's boarding actions
 //   - disruptions_used tracks budget; once exhausted, all service runs without disruption
 //   - done=true is absorbing (success at loc=3 or abandon via give_up)
@@ -40,8 +41,8 @@ player persona
     m_persona,
     [done_loop], [give_up],
     [choose_car], [taxi_direct], [bike_direct], [walk_to_destination], [walk_to_stop],
-    [board_bus], [board_rail], [wait_at_stop], [taxi_from_stop], [walk_back_home],
-    [final_leg_bus], [final_leg_rail], [final_leg_walk], [final_leg_taxi], [taxi_back_home]
+    [board_bus], [board_rail], [wait_at_stop], [taxi_from_stop],
+    [final_leg_bus], [final_leg_rail], [final_leg_walk], [final_leg_taxi]
 endplayer
 
 global phase : [0..1] init 0;
@@ -76,6 +77,17 @@ const int    ACCESSIBILITY_DISRUPTION_BUDGET;
 const int    WEATHER_DISRUPTION_BUDGET      ;
 
 // -------------------------------------------------------
+// Constants -- Policy availability (supplied via params/policy_config.json)
+// Set a flag to false to disable that policy for the manager.
+// At least one must be true or the model deadlocks at phase=0.
+// -------------------------------------------------------
+const bool ALLOW_NORMAL;
+const bool ALLOW_HIGH_FREQ;
+const bool ALLOW_LOW_FARE;
+const bool ALLOW_ROAD_CHARGE;
+const bool ALLOW_ACCESSIBLE_SERVICE;
+
+// -------------------------------------------------------
 // Failure penalty
 // 999 min >> any realistic journey time; give_up is never
 // strategically preferred over any valid transport option
@@ -96,7 +108,6 @@ const int CO2E_CAR_DIRECT;
 const int CO2E_TAXI_DIRECT;
 const int CO2E_TAXI_STOP;
 const int CO2E_TAXI_FINAL;
-const int CO2E_TAXI_HOME;
 const int CO2E_BUS_STOP_TO_INT;
 const int CO2E_RAIL_STOP_TO_INT;
 const int CO2E_BUS_FINAL;
@@ -107,7 +118,6 @@ const int TIME_CAR_CLEAR;         const int TIME_CAR_RAIN;         const int TIM
 const int TIME_TAXI_DIRECT_CLEAR; const int TIME_TAXI_DIRECT_RAIN; const int TIME_TAXI_DIRECT_SEVERE;
 const int TIME_TAXI_STOP_CLEAR;   const int TIME_TAXI_STOP_RAIN;   const int TIME_TAXI_STOP_SEVERE;
 const int TIME_TAXI_FINAL_CLEAR;  const int TIME_TAXI_FINAL_RAIN;  const int TIME_TAXI_FINAL_SEVERE;
-const int TIME_TAXI_HOME_CLEAR;   const int TIME_TAXI_HOME_RAIN;   const int TIME_TAXI_HOME_SEVERE;
 const int TIME_BUS_STOP_TO_INT;
 const int TIME_RAIL_STOP_TO_INT;
 const int TIME_FINAL_BUS;
@@ -125,7 +135,6 @@ const int RAIL_FARE_LOW;
 const int TAXI_DIRECT_FARE_BASE;
 const int TAXI_STOP_FARE_BASE;
 const int TAXI_FINAL_FARE_BASE;
-const int TAXI_HOME_FARE_BASE;
 const int ROAD_CHARGE_SURCHARGE;
 
 // Mode availability flags (supplied via preprocessing.py)
@@ -145,13 +154,16 @@ formula rail_fare        = policy=2 ? RAIL_FARE_LOW : RAIL_FARE_BASE;
 formula taxi_direct_fare = policy=3 ? TAXI_DIRECT_FARE_BASE+ROAD_CHARGE_SURCHARGE : TAXI_DIRECT_FARE_BASE;
 formula taxi_stop_fare   = policy=3 ? TAXI_STOP_FARE_BASE+ROAD_CHARGE_SURCHARGE   : TAXI_STOP_FARE_BASE;
 formula taxi_final_fare  = policy=3 ? TAXI_FINAL_FARE_BASE+ROAD_CHARGE_SURCHARGE  : TAXI_FINAL_FARE_BASE;
-formula taxi_home_fare   = policy=3 ? TAXI_HOME_FARE_BASE+ROAD_CHARGE_SURCHARGE   : TAXI_HOME_FARE_BASE;
 
 // Effective disruption probabilities -- halved under high_freq policy
 formula eff_cancel = policy=1 ? CANCEL_PROB * 0.5 : CANCEL_PROB;
 formula eff_delay  = policy=1 ? (MINOR_DELAY_PROB + MODERATE_DELAY_PROB + SEVERE_DELAY_PROB) * 0.5
                                : (MINOR_DELAY_PROB + MODERATE_DELAY_PROB + SEVERE_DELAY_PROB);
 formula eff_ok     = 1.0 - eff_cancel - eff_delay;
+
+// Lift failure probability -- in-journey disruption for rail, affects NEEDS_STEP_FREE personas only
+// accessible_service (policy=4) halves the base probability; all other policies use LIFT_BREAK_PROB
+formula eff_lift_fail = NEEDS_STEP_FREE ? (policy=4 ? LIFT_BREAK_PROB*0.5 : LIFT_BREAK_PROB) : 0.0;
 
 // Average delay duration (minutes) -- weighted by relative probability of each delay tier
 // Guard: if all delay probs are 0, eff_delay=0 so wait_at_stop is unreachable anyway
@@ -174,107 +186,79 @@ formula stuck_home =
 formula stuck_stop =
     service_status!=1
     & !(service_status=0 & HAS_BUS_STOP & (!NEEDS_STEP_FREE|acc_bus) & (HAS_BUS_PASS|fare_spent+bus_fare<=FARE_MAX))
-    & !(service_status=0 & HAS_RAIL_STOP & (!NEEDS_STEP_FREE|lift_ok) & fare_spent+rail_fare<=FARE_MAX)
-    & fare_spent+taxi_stop_fare>FARE_MAX
-    & (service_status!=2 | WALK_TOLERANCE<DIST_HOME_TO_STOP);
+    & !(service_status=0 & HAS_RAIL_STOP & fare_spent+rail_fare<=FARE_MAX)
+    & fare_spent+taxi_stop_fare>FARE_MAX;
 
 formula stuck_interchange =
     service_status!=1
     & !(service_status=0 & HAS_BUS_FINAL  & (!NEEDS_STEP_FREE|acc_bus) & (HAS_BUS_PASS|fare_spent+bus_fare<=FARE_MAX))
-    & !(service_status=0 & HAS_RAIL_FINAL & (!NEEDS_STEP_FREE|lift_ok) & fare_spent+rail_fare<=FARE_MAX)
+    & !(service_status=0 & HAS_RAIL_FINAL & fare_spent+rail_fare<=FARE_MAX)
     & WALK_TOLERANCE<DIST_INTERCHANGE_TO_DEST
-    & fare_spent+taxi_final_fare>FARE_MAX
-    & (service_status!=2 | fare_spent+taxi_home_fare>FARE_MAX);
+    & fare_spent+taxi_final_fare>FARE_MAX;
 
-// Manager sampling branch probabilities (weather x lift_ok x acc_bus are independent)
-formula p_w0   = 1.0 - RAIN_PROB - SEVERE_WEATHER_PROB;
-formula p_w1   = RAIN_PROB;
-formula p_w2   = SEVERE_WEATHER_PROB;
-formula p_lok  = 1.0 - LIFT_BREAK_PROB;
-formula p_lnok = LIFT_BREAK_PROB;
-formula p_ab   = 1.0 - NO_ACCESSIBLE_BUS_PROB;
-formula p_nb   = NO_ACCESSIBLE_BUS_PROB;
+// Manager sampling branch probabilities (weather x acc_bus are independent)
+formula p_w0 = 1.0 - RAIN_PROB - SEVERE_WEATHER_PROB;
+formula p_w1 = RAIN_PROB;
+formula p_w2 = SEVERE_WEATHER_PROB;
+formula p_ab = 1.0 - NO_ACCESSIBLE_BUS_PROB;
+formula p_nb = NO_ACCESSIBLE_BUS_PROB;
 
 
 // -------------------------------------------------------
 // Module m_manager
-// Owns: policy, weather, lift_ok, acc_bus
+// Owns: policy, weather, acc_bus
 // Reads: phase (global)
 // Acts at phase=0; sets phase=1 on every transition
+// lift_ok removed: lift failure is now an in-journey disruption (see eff_lift_fail)
 // -------------------------------------------------------
 module m_manager
 
     policy  : [0..4] init 0;
     weather : [0..2] init 0;
-    lift_ok : bool   init true;
     acc_bus : bool   init true;
 
     // set_normal (policy=0): no intervention; all disruption probabilities at baseline
-    [set_normal] phase=0 ->
-        p_w0*p_lok*p_ab  : (policy'=0)&(weather'=0)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lok*p_nb  : (policy'=0)&(weather'=0)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w0*p_lnok*p_ab : (policy'=0)&(weather'=0)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lnok*p_nb : (policy'=0)&(weather'=0)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lok*p_ab  : (policy'=0)&(weather'=1)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lok*p_nb  : (policy'=0)&(weather'=1)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lnok*p_ab : (policy'=0)&(weather'=1)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lnok*p_nb : (policy'=0)&(weather'=1)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lok*p_ab  : (policy'=0)&(weather'=2)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lok*p_nb  : (policy'=0)&(weather'=2)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lnok*p_ab : (policy'=0)&(weather'=2)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lnok*p_nb : (policy'=0)&(weather'=2)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1);
+    [set_normal] phase=0 & ALLOW_NORMAL ->
+        p_w0*p_ab : (policy'=0)&(weather'=0)&(acc_bus'=true) &(phase'=1)
+      + p_w0*p_nb : (policy'=0)&(weather'=0)&(acc_bus'=false)&(phase'=1)
+      + p_w1*p_ab : (policy'=0)&(weather'=1)&(acc_bus'=true) &(phase'=1)
+      + p_w1*p_nb : (policy'=0)&(weather'=1)&(acc_bus'=false)&(phase'=1)
+      + p_w2*p_ab : (policy'=0)&(weather'=2)&(acc_bus'=true) &(phase'=1)
+      + p_w2*p_nb : (policy'=0)&(weather'=2)&(acc_bus'=false)&(phase'=1);
 
     // set_high_freq (policy=1): increases service frequency; halves delay and cancel probabilities
-    [set_high_freq] phase=0 ->
-        p_w0*p_lok*p_ab  : (policy'=1)&(weather'=0)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lok*p_nb  : (policy'=1)&(weather'=0)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w0*p_lnok*p_ab : (policy'=1)&(weather'=0)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lnok*p_nb : (policy'=1)&(weather'=0)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lok*p_ab  : (policy'=1)&(weather'=1)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lok*p_nb  : (policy'=1)&(weather'=1)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lnok*p_ab : (policy'=1)&(weather'=1)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lnok*p_nb : (policy'=1)&(weather'=1)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lok*p_ab  : (policy'=1)&(weather'=2)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lok*p_nb  : (policy'=1)&(weather'=2)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lnok*p_ab : (policy'=1)&(weather'=2)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lnok*p_nb : (policy'=1)&(weather'=2)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1);
+    [set_high_freq] phase=0 & ALLOW_HIGH_FREQ ->
+        p_w0*p_ab : (policy'=1)&(weather'=0)&(acc_bus'=true) &(phase'=1)
+      + p_w0*p_nb : (policy'=1)&(weather'=0)&(acc_bus'=false)&(phase'=1)
+      + p_w1*p_ab : (policy'=1)&(weather'=1)&(acc_bus'=true) &(phase'=1)
+      + p_w1*p_nb : (policy'=1)&(weather'=1)&(acc_bus'=false)&(phase'=1)
+      + p_w2*p_ab : (policy'=1)&(weather'=2)&(acc_bus'=true) &(phase'=1)
+      + p_w2*p_nb : (policy'=1)&(weather'=2)&(acc_bus'=false)&(phase'=1);
 
-    // set_low_fare (policy=2): subsidizes bus (100p) and rail (200p) fares
-    [set_low_fare] phase=0 ->
-        p_w0*p_lok*p_ab  : (policy'=2)&(weather'=0)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lok*p_nb  : (policy'=2)&(weather'=0)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w0*p_lnok*p_ab : (policy'=2)&(weather'=0)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lnok*p_nb : (policy'=2)&(weather'=0)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lok*p_ab  : (policy'=2)&(weather'=1)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lok*p_nb  : (policy'=2)&(weather'=1)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lnok*p_ab : (policy'=2)&(weather'=1)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lnok*p_nb : (policy'=2)&(weather'=1)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lok*p_ab  : (policy'=2)&(weather'=2)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lok*p_nb  : (policy'=2)&(weather'=2)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lnok*p_ab : (policy'=2)&(weather'=2)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lnok*p_nb : (policy'=2)&(weather'=2)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1);
+    // set_low_fare (policy=2): subsidizes bus and rail fares
+    [set_low_fare] phase=0 & ALLOW_LOW_FARE ->
+        p_w0*p_ab : (policy'=2)&(weather'=0)&(acc_bus'=true) &(phase'=1)
+      + p_w0*p_nb : (policy'=2)&(weather'=0)&(acc_bus'=false)&(phase'=1)
+      + p_w1*p_ab : (policy'=2)&(weather'=1)&(acc_bus'=true) &(phase'=1)
+      + p_w1*p_nb : (policy'=2)&(weather'=1)&(acc_bus'=false)&(phase'=1)
+      + p_w2*p_ab : (policy'=2)&(weather'=2)&(acc_bus'=true) &(phase'=1)
+      + p_w2*p_nb : (policy'=2)&(weather'=2)&(acc_bus'=false)&(phase'=1);
 
-    // set_road_charge (policy=3): adds 500p surcharge to all taxi fares (discourages private hire)
-    [set_road_charge] phase=0 ->
-        p_w0*p_lok*p_ab  : (policy'=3)&(weather'=0)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lok*p_nb  : (policy'=3)&(weather'=0)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w0*p_lnok*p_ab : (policy'=3)&(weather'=0)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w0*p_lnok*p_nb : (policy'=3)&(weather'=0)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lok*p_ab  : (policy'=3)&(weather'=1)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lok*p_nb  : (policy'=3)&(weather'=1)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w1*p_lnok*p_ab : (policy'=3)&(weather'=1)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w1*p_lnok*p_nb : (policy'=3)&(weather'=1)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lok*p_ab  : (policy'=3)&(weather'=2)&(lift_ok'=true) &(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lok*p_nb  : (policy'=3)&(weather'=2)&(lift_ok'=true) &(acc_bus'=false)&(phase'=1)
-      + p_w2*p_lnok*p_ab : (policy'=3)&(weather'=2)&(lift_ok'=false)&(acc_bus'=true) &(phase'=1)
-      + p_w2*p_lnok*p_nb : (policy'=3)&(weather'=2)&(lift_ok'=false)&(acc_bus'=false)&(phase'=1);
+    // set_road_charge (policy=3): adds surcharge to all taxi fares (discourages private hire)
+    [set_road_charge] phase=0 & ALLOW_ROAD_CHARGE ->
+        p_w0*p_ab : (policy'=3)&(weather'=0)&(acc_bus'=true) &(phase'=1)
+      + p_w0*p_nb : (policy'=3)&(weather'=0)&(acc_bus'=false)&(phase'=1)
+      + p_w1*p_ab : (policy'=3)&(weather'=1)&(acc_bus'=true) &(phase'=1)
+      + p_w1*p_nb : (policy'=3)&(weather'=1)&(acc_bus'=false)&(phase'=1)
+      + p_w2*p_ab : (policy'=3)&(weather'=2)&(acc_bus'=true) &(phase'=1)
+      + p_w2*p_nb : (policy'=3)&(weather'=2)&(acc_bus'=false)&(phase'=1);
 
-    // set_accessible_service (policy=4): guarantees lift_ok=true and acc_bus=true;
-    // only weather is sampled (3 branches instead of 12)
-    [set_accessible_service] phase=0 ->
-        p_w0 : (policy'=4)&(weather'=0)&(lift_ok'=true)&(acc_bus'=true)&(phase'=1)
-      + p_w1 : (policy'=4)&(weather'=1)&(lift_ok'=true)&(acc_bus'=true)&(phase'=1)
-      + p_w2 : (policy'=4)&(weather'=2)&(lift_ok'=true)&(acc_bus'=true)&(phase'=1);
+    // set_accessible_service (policy=4): guarantees acc_bus=true and halves LIFT_BREAK_PROB;
+    // only weather is sampled (3 branches)
+    [set_accessible_service] phase=0 & ALLOW_ACCESSIBLE_SERVICE ->
+        p_w0 : (policy'=4)&(weather'=0)&(acc_bus'=true)&(phase'=1)
+      + p_w1 : (policy'=4)&(weather'=1)&(acc_bus'=true)&(phase'=1)
+      + p_w2 : (policy'=4)&(weather'=2)&(acc_bus'=true)&(phase'=1);
 
 endmodule
 
@@ -282,7 +266,7 @@ endmodule
 // -------------------------------------------------------
 // Module m_persona
 // Owns: loc, mode, done, abandon, service_status, disruptions_used, fare_spent
-// Reads: phase (global), policy/weather/lift_ok/acc_bus (from m_manager state)
+// Reads: phase (global), policy/weather/acc_bus (from m_manager state)
 // Acts at phase=1; loops until done=true
 //
 // service_status: 0=normal  1=delayed (resolved by wait_at_stop)  2=cancelled
@@ -366,20 +350,19 @@ module m_persona
         -> (loc'=2) & (mode'=3) & (fare_spent'=fare_spent+bus_fare);
 
     // Board rail -- variant A
+    // eff_lift_fail absorbed into cancel outcome (same result: service_status=2, persona retries)
     [board_rail] phase=1 & loc=1 & !done & service_status=0
                  & HAS_RAIL_STOP
                  & disruptions_used<DISRUPTION_BUDGET
-                 & (!NEEDS_STEP_FREE | lift_ok)
                  & fare_spent+rail_fare<=FARE_MAX
-        -> eff_ok     : (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare)
-         + eff_delay  : (service_status'=1) & (disruptions_used'=disruptions_used+1)
-         + eff_cancel : (service_status'=2) & (disruptions_used'=disruptions_used+1);
+        -> eff_ok-eff_lift_fail             : (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare)
+         + eff_delay                        : (service_status'=1) & (disruptions_used'=disruptions_used+1)
+         + eff_cancel+eff_lift_fail         : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Board rail -- variant B
+    // Board rail -- variant B (budget exhausted; lift failure also suppressed)
     [board_rail] phase=1 & loc=1 & !done & service_status=0
                  & HAS_RAIL_STOP
                  & disruptions_used>=DISRUPTION_BUDGET
-                 & (!NEEDS_STEP_FREE | lift_ok)
                  & fare_spent+rail_fare<=FARE_MAX
         -> (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare);
 
@@ -390,10 +373,6 @@ module m_persona
     // Taxi from stop
     [taxi_from_stop] phase=1 & loc=1 & !done & fare_spent+taxi_stop_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_stop_fare) & (done'=true);
-
-    // Walk back home from stop: only when service is cancelled; prevents infinite cycling
-    [walk_back_home] phase=1 & loc=1 & !done & service_status=2 & WALK_TOLERANCE>=DIST_HOME_TO_STOP
-        -> (loc'=0) & (mode'=2) & (service_status'=0);
 
 
     // -------------------------------------------------------
@@ -422,17 +401,15 @@ module m_persona
     [final_leg_rail] phase=1 & loc=2 & !done & service_status=0
                      & HAS_RAIL_FINAL
                      & disruptions_used<DISRUPTION_BUDGET
-                     & (!NEEDS_STEP_FREE | lift_ok)
                      & fare_spent+rail_fare<=FARE_MAX
-        -> eff_ok     : (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (done'=true)
-         + eff_delay  : (service_status'=1) & (disruptions_used'=disruptions_used+1)
-         + eff_cancel : (service_status'=2) & (disruptions_used'=disruptions_used+1);
+        -> eff_ok-eff_lift_fail         : (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (done'=true)
+         + eff_delay                    : (service_status'=1) & (disruptions_used'=disruptions_used+1)
+         + eff_cancel+eff_lift_fail     : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Final leg rail -- variant B
+    // Final leg rail -- variant B (budget exhausted; lift failure also suppressed)
     [final_leg_rail] phase=1 & loc=2 & !done & service_status=0
                      & HAS_RAIL_FINAL
                      & disruptions_used>=DISRUPTION_BUDGET
-                     & (!NEEDS_STEP_FREE | lift_ok)
                      & fare_spent+rail_fare<=FARE_MAX
         -> (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (done'=true);
 
@@ -447,12 +424,6 @@ module m_persona
     // Final leg taxi
     [final_leg_taxi] phase=1 & loc=2 & !done & fare_spent+taxi_final_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_final_fare) & (done'=true);
-
-    // Taxi back home from interchange: used when service is cancelled at loc=2
-    // Persona returns to loc=0 to reconsider; service_status reset on arrival
-    [taxi_back_home] phase=1 & loc=2 & !done & service_status=2
-                     & fare_spent+taxi_home_fare<=FARE_MAX
-        -> (loc'=0) & (mode'=4) & (fare_spent'=fare_spent+taxi_home_fare) & (service_status'=0);
 
 endmodule
 
@@ -474,13 +445,9 @@ rewards "time"
     [final_leg_taxi]      weather=0 :  TIME_TAXI_FINAL_CLEAR;
     [final_leg_taxi]      weather=1 :  TIME_TAXI_FINAL_RAIN;
     [final_leg_taxi]      weather=2 :  TIME_TAXI_FINAL_SEVERE;
-    [taxi_back_home]      weather=0 :  TIME_TAXI_HOME_CLEAR;
-    [taxi_back_home]      weather=1 :  TIME_TAXI_HOME_RAIN;
-    [taxi_back_home]      weather=2 :  TIME_TAXI_HOME_SEVERE;
     [bike_direct]         true      :  TIME_BIKE_DIRECT;
     [walk_to_destination] true      :  TIME_WALK_TO_DEST;
     [walk_to_stop]        true      :  TIME_WALK_TO_STOP;
-    [walk_back_home]      true      :  TIME_WALK_TO_STOP;
     [board_bus]           true      :  TIME_BUS_STOP_TO_INT;
     [board_rail]          true      :  TIME_RAIL_STOP_TO_INT;
     [final_leg_bus]       true      :  TIME_FINAL_BUS;
@@ -501,7 +468,6 @@ rewards "co2e"
     [taxi_direct]         true :  CO2E_TAXI_DIRECT;
     [taxi_from_stop]      true :  CO2E_TAXI_STOP;
     [final_leg_taxi]      true :  CO2E_TAXI_FINAL;
-    [taxi_back_home]      true :  CO2E_TAXI_HOME;
     [board_bus]           true :  CO2E_BUS_STOP_TO_INT;
     [board_rail]          true :  CO2E_RAIL_STOP_TO_INT;
     [final_leg_bus]       true :  CO2E_BUS_FINAL;
@@ -509,7 +475,6 @@ rewards "co2e"
     [bike_direct]         true :     0;
     [walk_to_destination] true :     0;
     [walk_to_stop]        true :     0;
-    [walk_back_home]      true :     0;
     [final_leg_walk]      true :     0;
 endrewards
 
@@ -532,7 +497,6 @@ rewards "fare"
     [final_leg_bus]  true : bus_fare;
     [final_leg_rail] true : rail_fare;
     [final_leg_taxi] true : taxi_final_fare;
-    [taxi_back_home] true : taxi_home_fare;
 endrewards
 
 // -------------------------------------------------------
@@ -540,7 +504,6 @@ endrewards
 // -------------------------------------------------------
 rewards "walking_distance"
     [walk_to_stop]        true :  DIST_HOME_TO_STOP;
-    [walk_back_home]      true :  DIST_HOME_TO_STOP;
     [final_leg_walk]      true :  DIST_INTERCHANGE_TO_DEST;
     [walk_to_destination] true :  DIST_HOME_TO_DEST;
 endrewards
