@@ -6,5 +6,8 @@
   "WALK_TOLERANCE": 2500,
   "FARE_MAX": 2500,
   "HAS_BIKE": true,
-  "BIKE_TOLERANCE": 8000
+  "BIKE_TOLERANCE": 8000,
+  "W_TIME": 18,
+  "W_FARE": 1.2,
+  "W_WALK": 0.1
 }

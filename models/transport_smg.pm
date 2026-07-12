@@ -30,6 +30,10 @@
 // Boarding is split into attempt_* / ride_* actions: attempt resolves the service
 //   outcome, ride (forced when pending>0) performs the leg and carries the rewards,
 //   so time/co2e/fare are only charged on legs actually travelled.
+//
+// "generalized_cost" reward (equivalent pence) combines time, fare and walking
+//   with per-persona weights W_TIME / W_FARE / W_WALK -- the persona's true
+//   objective for best-response (Stackelberg) analyses.
 // ============================================================
 
 smg
@@ -60,6 +64,11 @@ const bool HAS_BIKE;
 const int  WALK_TOLERANCE;
 const int  BIKE_TOLERANCE;
 const int  FARE_MAX;
+
+// Generalized-cost weights (per persona; placeholder values pending DfT TAG sourcing)
+const double W_TIME;   // pence per minute (value of time)
+const double W_FARE;   // multiplier on pence actually paid
+const double W_WALK;   // pence per metre walked
 
 // -------------------------------------------------------
 // Constants -- Scenario (supplied via params/scenarios/*.json)
@@ -514,4 +523,37 @@ rewards "walking_distance"
     [walk_to_stop]        true :  DIST_HOME_TO_STOP;
     [final_leg_walk]      true :  DIST_INTERCHANGE_TO_DEST;
     [walk_to_destination] true :  DIST_HOME_TO_DEST;
+endrewards
+
+
+
+// -------------------------------------------------------
+// Rewards: generalized cost (equivalent pence)
+// Per-persona trade-off between time, money and walking:
+//   W_TIME (pence/min, value of time) | W_FARE (multiplier on pence paid)
+//   W_WALK (pence/metre walked)
+// give_up charges nothing, consistent with the "time" reward.
+// -------------------------------------------------------
+rewards "generalized_cost"
+    [choose_car]          weather=0 : W_TIME*TIME_CAR_CLEAR          + W_FARE*car_cost;
+    [choose_car]          weather=1 : W_TIME*TIME_CAR_RAIN           + W_FARE*car_cost;
+    [choose_car]          weather=2 : W_TIME*TIME_CAR_SEVERE         + W_FARE*car_cost;
+    [taxi_direct]         weather=0 : W_TIME*TIME_TAXI_DIRECT_CLEAR  + W_FARE*taxi_direct_fare;
+    [taxi_direct]         weather=1 : W_TIME*TIME_TAXI_DIRECT_RAIN   + W_FARE*taxi_direct_fare;
+    [taxi_direct]         weather=2 : W_TIME*TIME_TAXI_DIRECT_SEVERE + W_FARE*taxi_direct_fare;
+    [taxi_from_stop]      weather=0 : W_TIME*TIME_TAXI_STOP_CLEAR    + W_FARE*taxi_stop_fare;
+    [taxi_from_stop]      weather=1 : W_TIME*TIME_TAXI_STOP_RAIN     + W_FARE*taxi_stop_fare;
+    [taxi_from_stop]      weather=2 : W_TIME*TIME_TAXI_STOP_SEVERE   + W_FARE*taxi_stop_fare;
+    [final_leg_taxi]      weather=0 : W_TIME*TIME_TAXI_FINAL_CLEAR   + W_FARE*taxi_final_fare;
+    [final_leg_taxi]      weather=1 : W_TIME*TIME_TAXI_FINAL_RAIN    + W_FARE*taxi_final_fare;
+    [final_leg_taxi]      weather=2 : W_TIME*TIME_TAXI_FINAL_SEVERE  + W_FARE*taxi_final_fare;
+    [bike_direct]         true      : W_TIME*TIME_BIKE_DIRECT;
+    [walk_to_destination] true      : W_TIME*TIME_WALK_TO_DEST       + W_WALK*DIST_HOME_TO_DEST;
+    [walk_to_stop]        true      : W_TIME*TIME_WALK_TO_STOP       + W_WALK*DIST_HOME_TO_STOP;
+    [ride_bus]            true      : W_TIME*TIME_BUS_STOP_TO_INT    + W_FARE*bus_fare;
+    [ride_rail]           true      : W_TIME*TIME_RAIL_STOP_TO_INT   + W_FARE*rail_fare;
+    [ride_final_bus]      true      : W_TIME*TIME_FINAL_BUS          + W_FARE*bus_fare;
+    [ride_final_rail]     true      : W_TIME*TIME_FINAL_RAIL         + W_FARE*rail_fare;
+    [final_leg_walk]      true      : W_TIME*TIME_FINAL_WALK         + W_WALK*DIST_INTERCHANGE_TO_DEST;
+    [wait_at_stop]        true      : W_TIME*avg_wait_time;
 endrewards

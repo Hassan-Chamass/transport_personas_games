@@ -924,6 +924,9 @@ function renderPersonaEditor(data) {
     WALK_TOLERANCE:  'Maximum walking distance the persona is willing to accept, in metres',
     BIKE_TOLERANCE:  'Maximum cycling distance the persona is willing to accept, in metres',
     FARE_MAX:        'Maximum total fare the persona is willing to pay, in pence — journeys above this threshold are rejected',
+    W_TIME:          'Value of time: how many pence one minute of travel is worth to this persona (generalized cost weight)',
+    W_FARE:          'Sensitivity to money: multiplier applied to every pence actually paid (1 = neutral, higher = poorer)',
+    W_WALK:          'Walking aversion: pence-equivalent cost per metre walked (higher = walking is harder)',
   };
   const boolKeys = Object.entries(data).filter(([k, v]) => typeof v === 'boolean' && k !== 'name');
   const numKeys  = Object.entries(data).filter(([k, v]) => typeof v === 'number');
@@ -931,7 +934,7 @@ function renderPersonaEditor(data) {
     <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.5rem">
       ${boolKeys.map(([k, v]) => toggleRow(`pcustom_${k}`, k, v, personaTooltips[k] || '')).join('')}
       <div class="grid-2" style="margin-top:0.8rem">
-        ${numKeys.map(([k, v]) => numInput(`pcustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1, personaTooltips[k] || '')).join('')}
+        ${numKeys.map(([k, v]) => numInput(`pcustom_${k}`, k, v, (k.includes('PROB') || k.startsWith('W_')) ? 0.01 : 1, personaTooltips[k] || '')).join('')}
       </div>
     </div>`;
 }
@@ -1356,7 +1359,7 @@ function renderPropsSelectedCard() {
 
   el.innerHTML = `<div class="sel-item">
     <div class="sel-item-header">
-      <span class="sel-item-name">${selected.length} / 52 properties selected</span>
+      <span class="sel-item-name">${selected.length} / ${state.allProps.filter(p => p.index).length} properties selected</span>
       <div class="sel-item-actions">
         <button class="expand-btn" id="props-expand-btn" onclick="togglePropsExpand()">▼</button>
       </div>
@@ -1717,7 +1720,8 @@ function updateSummary() {
 
   // Props
   const checkedCount = document.querySelectorAll('.prop-cb:checked').length;
-  setSum('sum-props', checkedCount > 0 ? `${checkedCount} / 52` : null);
+  const totalProps = state.allProps.filter(p => p.index).length;
+  setSum('sum-props', checkedCount > 0 ? `${checkedCount} / ${totalProps}` : null);
 
   // Highlight active step row
   for (let i = 1; i <= 6; i++) {

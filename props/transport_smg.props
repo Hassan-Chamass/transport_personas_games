@@ -237,3 +237,50 @@
 
 // 46. Ideal target: CO2e<=200g AND time<=50 min AND fare<=500p
 <<manager,persona>> ( R{"co2e"}<=200 [C] & R{"time"}<=50 [C] & R{"fare"}<=500 [C] )
+
+
+// ============================
+// SECTION H — GENERALIZED COST (persona's true objective)
+// Combines time, fare and walking via per-persona weights W_TIME/W_FARE/W_WALK.
+// Unit: equivalent pence. Thresholds calibrated for the Giffnock corridor
+// (typical journeys range roughly 700-2500 equivalent pence).
+// Prop 48 with a single policy forced in run_config = the persona's best
+// response to that policy -- the follower side of the Stackelberg analysis.
+// ============================
+
+// 47. Guaranteed generalized cost against any policy (adversarial manager)
+<<persona>> R{"generalized_cost"}min=? [ F done ]
+
+// 48. Best achievable generalized cost (cooperative; persona best response when one policy is forced)
+<<manager,persona>> R{"generalized_cost"}min=? [ F done ]
+
+// 49. Affordable journey: expected generalized cost <=1000 equivalent pence?
+<<manager,persona>> R{"generalized_cost"}<=1000 [ F done ]
+
+// 50. Acceptable journey: expected generalized cost <=2000 equivalent pence?
+<<manager,persona>> R{"generalized_cost"}<=2000 [ F done ]
+
+// 51. Private utility x public good: generalized cost <=2000 AND CO2e <=500g
+<<manager,persona>> ( R{"generalized_cost"}<=2000 [C] & R{"co2e"}<=500 [C] )
+
+// 52. Relaxed trade-off: generalized cost <=3000 AND CO2e <=1000g
+<<manager,persona>> ( R{"generalized_cost"}<=3000 [C] & R{"co2e"}<=1000 [C] )
+
+
+// --- Mode-conditioned best plans ---
+// The rational persona picks the argmin of props 53-56: comparing these four
+// values reveals the chosen mode WITHOUT parsing strategy files.
+// Infinity = that mode cannot complete the journey for this persona.
+// Note: mode records the LAST leg only (walk->rail->bus counts as PT).
+
+// 53. Best car journey (generalized cost)
+<<manager,persona>> R{"generalized_cost"}min=? [ F (loc=3 & mode=1) ]
+
+// 54. Best public-transport journey (last leg bus or rail)
+<<manager,persona>> R{"generalized_cost"}min=? [ F (loc=3 & (mode=3 | mode=5)) ]
+
+// 55. Best taxi journey
+<<manager,persona>> R{"generalized_cost"}min=? [ F (loc=3 & mode=4) ]
+
+// 56. Best active journey (last leg walk or bike)
+<<manager,persona>> R{"generalized_cost"}min=? [ F (loc=3 & (mode=2 | mode=6)) ]

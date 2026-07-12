@@ -2,9 +2,12 @@
   "name": "less_mobile",
   "CAR_AVAILABLE": true,
   "NEEDS_STEP_FREE": true,
-  "HAS_BUS_PASS": false,
+  "HAS_BUS_PASS": true,
   "WALK_TOLERANCE": 200,
   "FARE_MAX": 3000,
   "HAS_BIKE": false,
-  "BIKE_TOLERANCE": 0
+  "BIKE_TOLERANCE": 0,
+  "W_TIME": 8,
+  "W_FARE": 1.0,
+  "W_WALK": 1.0
 }

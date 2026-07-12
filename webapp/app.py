@@ -87,7 +87,7 @@ def _parse_props(props_file: Path) -> list[dict]:
                 if comment.upper().startswith("SECTION"):
                     props.append({"type": "section", "title": comment})
                 else:
-                    current_comment = comment
+                    current_comment = re.sub(r'^\d+\.\s*', '', comment)
             elif s and (s.startswith("<<") or "=?" in s or ">=" in s or "<=" in s):
                 idx += 1
                 props.append({
