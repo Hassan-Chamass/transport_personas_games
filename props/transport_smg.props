@@ -63,13 +63,7 @@
 // 7. Min guaranteed walking distance (metres)
 <<persona>> R{"walking_distance"}min=? [ F done ]
 
-// 8. Max guaranteed arrival probability — car-free (mode!=1 at destination)
-<<persona>> Pmax=? [ F (loc=3 & mode!=1) ]
-
-// 9. Max guaranteed arrival probability — no car or taxi (bus/rail/walk/bike)
-<<persona>> Pmax=? [ F (loc=3 & mode!=1 & mode!=4) ]
-
-// 10. Worst-case abandonment probability (persona minimises, manager maximises failures)
+// 8. Worst-case abandonment probability (persona minimises, manager maximises failures)
 <<manager>> Pmax=? [ F (done & abandon) ]
 
 
@@ -79,32 +73,20 @@
 // Question: "What is achievable under the optimal joint strategy?"
 // ============================
 
-// 11. Best achievable arrival probability
+// 9. Best achievable arrival probability
 <<manager,persona>> Pmax=? [ F loc=3 ]
 
-// 12. Minimum achievable CO2e
+// 10. Minimum achievable CO2e
 <<manager,persona>> R{"co2e"}min=? [ F done ]
 
-// 13. Minimum achievable journey time
+// 11. Minimum achievable journey time
 <<manager,persona>> R{"time"}min=? [ F done ]
 
-// 14. Minimum achievable fare
+// 12. Minimum achievable fare
 <<manager,persona>> R{"fare"}min=? [ F done ]
 
-// 15. Minimum total walking distance
+// 13. Minimum total walking distance
 <<manager,persona>> R{"walking_distance"}min=? [ F done ]
-
-// 16. Best arrival probability — car-free
-<<manager,persona>> Pmax=? [ F (loc=3 & mode!=1) ]
-
-// 17. Min CO2e — car-free
-<<manager,persona>> R{"co2e"}min=? [ F (done & mode!=1) ]
-
-// 18. Best arrival probability — no car or taxi
-<<manager,persona>> Pmax=? [ F (loc=3 & mode!=1 & mode!=4) ]
-
-// 19. Min CO2e — no car or taxi
-<<manager,persona>> R{"co2e"}min=? [ F (done & mode!=1 & mode!=4) ]
 
 
 // ============================
@@ -113,13 +95,13 @@
 // Question: "What outcomes can the manager enforce despite a self-interested traveller?"
 // ============================
 
-// 20. Best arrival probability the manager can enforce
+// 14. Best arrival probability the manager can enforce
 <<manager>> Pmax=? [ F loc=3 ]
 
-// 21. Minimum CO2e the manager can enforce (e.g. set_road_charge discourages taxis)
+// 15. Minimum CO2e the manager can enforce (e.g. set_road_charge discourages taxis)
 <<manager>> R{"co2e"}min=? [ F done ]
 
-// 22. Minimum abandonment rate the manager can enforce
+// 16. Minimum abandonment rate the manager can enforce
 <<manager>> Pmax=? [ F (done & abandon) ]
 
 
@@ -130,57 +112,57 @@
 
 // --- Reliability ---
 
-// 23. Can cooperation guarantee >=95% arrival?
+// 17. Can cooperation guarantee >=95% arrival?
 <<manager,persona>> P>=0.95 [ F loc=3 ]
 
-// 24. Can cooperation guarantee >=80% arrival?
+// 18. Can cooperation guarantee >=80% arrival?
 <<manager,persona>> P>=0.80 [ F loc=3 ]
 
-// 25. Can persona guarantee >=80% arrival against adversarial manager?
+// 19. Can persona guarantee >=80% arrival against adversarial manager?
 <<persona>> P>=0.80 [ F loc=3 ]
 
-// 26. Can manager force >=20% abandonment against self-interested persona?
+// 20. Can manager force >=20% abandonment against self-interested persona?
 <<manager>> P>=0.20 [ F (done & abandon) ]
 
 
 // --- Time bounds (expected minutes) ---
 
-// 27. Fast journey: can cooperation achieve expected time <=35 min?
+// 21. Fast journey: can cooperation achieve expected time <=35 min?
 <<manager,persona>> R{"time"}<=35 [ F done ]
 
-// 28. Standard journey: can cooperation achieve expected time <=50 min?
+// 22. Standard journey: can cooperation achieve expected time <=50 min?
 <<manager,persona>> R{"time"}<=50 [ F done ]
 
-// 29. Extended journey: can cooperation achieve expected time <=70 min?
+// 23. Extended journey: can cooperation achieve expected time <=70 min?
 <<manager,persona>> R{"time"}<=70 [ F done ]
 
 
 // --- Carbon bounds (expected grams CO2e) ---
 // Reference: rail-only ~177 g | bus-only ~877 g | taxi direct ~1189 g
 
-// 30. Rail-grade: expected CO2e <=200 g?
+// 24. Rail-grade: expected CO2e <=200 g?
 <<manager,persona>> R{"co2e"}<=200 [ F done ]
 
-// 31. Low-carbon: expected CO2e <=500 g (bus+walk or rail qualify)
+// 25. Low-carbon: expected CO2e <=500 g (bus+walk or rail qualify)
 <<manager,persona>> R{"co2e"}<=500 [ F done ]
 
-// 32. Mid-carbon: expected CO2e <=1000 g (bus, rail, car qualify; most taxi does not)
+// 26. Mid-carbon: expected CO2e <=1000 g (bus, rail, car qualify; most taxi does not)
 <<manager,persona>> R{"co2e"}<=1000 [ F done ]
 
 
 // --- Fare bounds (expected pence) ---
-// Reference: bus pass=0p | bus=245p | rail=430p | taxi direct=1750p
+// Reference: bus pass=0p | bus=245p | rail=430p | car=120p | taxi direct=1500p
 
-// 33. Free travel: expected fare <=50p (bus pass holders or car owners)
+// 27. Free travel: expected fare <=50p (bus pass holders or car owners)
 <<manager,persona>> R{"fare"}<=50 [ F done ]
 
-// 34. Bus-grade fare: expected fare <=300p
+// 28. Bus-grade fare: expected fare <=300p
 <<manager,persona>> R{"fare"}<=300 [ F done ]
 
-// 35. Rail-grade fare: expected fare <=500p (bus or rail; no taxi legs)
+// 29. Rail-grade fare: expected fare <=500p (bus or rail; no taxi legs)
 <<manager,persona>> R{"fare"}<=500 [ F done ]
 
-// 36. High fare: expected fare <=2000p (includes most taxi journeys)
+// 30. High fare: expected fare <=2000p (includes most taxi journeys)
 <<manager,persona>> R{"fare"}<=2000 [ F done ]
 
 
@@ -191,23 +173,23 @@
 // For absorbing models (done is absorbing), [C] == [F done] in expected value.
 //
 // Note: P and R objectives cannot be combined in the same query for SMGs.
-// To check "high arrival probability AND low CO2e", run props 11 and 12 separately
+// To check "high arrival probability AND low CO2e", run props 9 and 10 separately
 // and verify both thresholds are met independently.
 // ============================
 
-// 37. Rail-grade CO2e (<=200g) AND fast journey (<=35 min) — only rail+walk achieves both
+// 31. Rail-grade CO2e (<=200g) AND fast journey (<=35 min) — only rail+walk achieves both
 <<manager,persona>> ( R{"co2e"}<=200 [C] & R{"time"}<=35 [C] )
 
-// 38. Low-carbon (<=500g) AND standard time (<=50 min)
+// 32. Low-carbon (<=500g) AND standard time (<=50 min)
 <<manager,persona>> ( R{"co2e"}<=500 [C] & R{"time"}<=50 [C] )
 
-// 39. Low-carbon (<=500g) AND extended time (<=70 min) — allows one delay
+// 33. Low-carbon (<=500g) AND extended time (<=70 min) — allows one delay
 <<manager,persona>> ( R{"co2e"}<=500 [C] & R{"time"}<=70 [C] )
 
-// 40. Mid-carbon (<=1000g) AND fast journey (<=35 min) — car or direct rail
+// 34. Mid-carbon (<=1000g) AND fast journey (<=35 min) — car or direct rail
 <<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"time"}<=35 [C] )
 
-// 41. Mid-carbon (<=1000g) AND standard time (<=50 min)
+// 35. Mid-carbon (<=1000g) AND standard time (<=50 min)
 <<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"time"}<=50 [C] )
 
 
@@ -217,41 +199,41 @@
 
 // --- CO2e x fare ---
 
-// 42. Rail-grade CO2e (<=200g) AND affordable fare (<=500p)
+// 36. Rail-grade CO2e (<=200g) AND affordable fare (<=500p)
 <<manager,persona>> ( R{"co2e"}<=200 [C] & R{"fare"}<=500 [C] )
 
-// 43. Low-carbon (<=500g) AND bus-grade fare (<=300p)
+// 37. Low-carbon (<=500g) AND bus-grade fare (<=300p)
 <<manager,persona>> ( R{"co2e"}<=500 [C] & R{"fare"}<=300 [C] )
 
-// 44. Mid-carbon (<=1000g) AND rail-grade fare (<=500p)
+// 38. Mid-carbon (<=1000g) AND rail-grade fare (<=500p)
 <<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"fare"}<=500 [C] )
 
-// 45. Mid-carbon (<=1000g) AND high fare (<=2000p)
+// 39. Mid-carbon (<=1000g) AND high fare (<=2000p)
 <<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"fare"}<=2000 [C] )
 
 
 // --- time x fare ---
 
-// 46. Fast (<=35 min) AND nearly free (<=50p) — car owner or bus pass holder
+// 40. Fast (<=35 min) AND nearly free (<=50p) — car owner or bus pass holder
 <<manager,persona>> ( R{"time"}<=35 [C] & R{"fare"}<=50 [C] )
 
-// 47. Standard time (<=50 min) AND bus-grade fare (<=300p)
+// 41. Standard time (<=50 min) AND bus-grade fare (<=300p)
 <<manager,persona>> ( R{"time"}<=50 [C] & R{"fare"}<=300 [C] )
 
-// 48. Standard time (<=50 min) AND rail-grade fare (<=500p)
+// 42. Standard time (<=50 min) AND rail-grade fare (<=500p)
 <<manager,persona>> ( R{"time"}<=50 [C] & R{"fare"}<=500 [C] )
 
-// 49. Extended time (<=70 min) AND bus-grade fare (<=300p) — PT with possible delay
+// 43. Extended time (<=70 min) AND bus-grade fare (<=300p) — PT with possible delay
 <<manager,persona>> ( R{"time"}<=70 [C] & R{"fare"}<=300 [C] )
 
 
 // --- Three objectives simultaneously ---
 
-// 50. Sustainable + affordable + timely: CO2e<=500g AND time<=50 min AND fare<=300p
+// 44. Sustainable + affordable + timely: CO2e<=500g AND time<=50 min AND fare<=300p
 <<manager,persona>> ( R{"co2e"}<=500 [C] & R{"time"}<=50 [C] & R{"fare"}<=300 [C] )
 
-// 51. Broad acceptable: CO2e<=1000g AND time<=70 min AND fare<=500p
+// 45. Broad acceptable: CO2e<=1000g AND time<=70 min AND fare<=500p
 <<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"time"}<=70 [C] & R{"fare"}<=500 [C] )
 
-// 52. Ideal target: CO2e<=200g AND time<=50 min AND fare<=500p
+// 46. Ideal target: CO2e<=200g AND time<=50 min AND fare<=500p
 <<manager,persona>> ( R{"co2e"}<=200 [C] & R{"time"}<=50 [C] & R{"fare"}<=500 [C] )

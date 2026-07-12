@@ -154,6 +154,12 @@ input:checked + .slider::before { transform: translateX(18px); }
 .info-toggle:hover { background: #eef1ff; }
 .model-overview { display: none; margin-bottom: 1.2rem; background: #f9faff; border: 1px solid #e8ecff; border-radius: 8px; padding: 0.8rem; overflow-x: auto; }
 .model-overview.open { display: block; }
+
+/* ── Tooltip (i badge) ───────────────────────────────────────────────────── */
+.tip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid #4361ee; color: #4361ee; font-size: 0.58rem; font-weight: 800; font-style: italic; font-family: Georgia, serif; cursor: default; margin-left: 4px; vertical-align: middle; flex-shrink: 0; line-height: 1; opacity: 0.65; transition: opacity 0.15s; }
+.tip:hover { opacity: 1; }
+.tip::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%); background: #1a1a2e; color: #fff; font-size: 0.72rem; font-weight: 400; font-style: normal; font-family: system-ui, -apple-system, sans-serif; line-height: 1.45; padding: 0.45rem 0.65rem; border-radius: 6px; white-space: normal; width: 230px; text-align: left; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 200; box-shadow: 0 3px 10px rgba(0,0,0,0.25); }
+.tip:hover::after { opacity: 1; }
 </style>
 </head>
 <body>
@@ -528,7 +534,7 @@ function goToStep(n) {
   if (state.currentStep === 1) snapshotTrip();
   if (state.currentStep === 4) {
     snapshotFactors(); snapshotPolicy();
-    if (n > 4 && state.policyData && Object.values(state.policyData).every(v => v === false)) {
+    if (n > 4 && state.policyData && Object.keys(state.policyData).filter(k => k.startsWith('ALLOW_')).every(k => !state.policyData[k])) {
       alert('At least one policy must be enabled.'); return;
     }
   }
@@ -560,16 +566,20 @@ async function api(path, opts) {
   return r.json();
 }
 
-function numInput(id, label, value, step = 'any') {
+function tip(text) {
+  return `<span class="tip" data-tip="${text}">i</span>`;
+}
+
+function numInput(id, label, value, step = 'any', tooltip = '') {
   return `<div class="field-row">
-    <label>${label}</label>
+    <label>${label}${tooltip ? tip(tooltip) : ''}</label>
     <input type="number" id="${id}" value="${value}" step="${step}">
   </div>`;
 }
 
-function toggleRow(id, label, checked) {
+function toggleRow(id, label, checked, tooltip = '') {
   return `<div class="toggle-row">
-    <span>${label}</span>
+    <span>${label}${tooltip ? tip(tooltip) : ''}</span>
     <label class="toggle">
       <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
       <span class="slider"></span>
@@ -762,21 +772,37 @@ function renderTripEditor(data) {
   const stopModes  = data.available_modes_from_stop        || { bus: true, rail: true };
   const finalModes = data.available_modes_from_interchange || { bus: true, rail: false };
 
+  const segTooltips = {
+    walk_to_stop:             'Walking segment from home to the nearest public transport stop',
+    car_direct:               'Car journey directly from home to destination',
+    taxi_direct:              'Taxi journey directly from home to destination',
+    taxi_from_stop:           'Taxi from the local stop to destination',
+    taxi_final_leg:           'Taxi for the final leg from the interchange hub to destination',
+    bus_stop_to_interchange:  'Bus from the local stop to the interchange hub',
+    rail_stop_to_interchange: 'Train from the local stop to the interchange hub',
+    bus_interchange_to_dest:  'Bus from the interchange hub to the final destination',
+    rail_interchange_to_dest: 'Train from the interchange hub to the final destination',
+    walk_interchange_to_dest: 'Walking from the interchange hub to the final destination',
+    bike_direct:              'Cycling directly from home to destination',
+    walk_direct:              'Walking directly from home to destination',
+  };
+
   const segBlock = (key, label, hasWeather) => {
     const s = seg[key] || {};
     const inner = hasWeather
       ? (() => { const t = s.time_min || {};
           return `<div class="grid-3">
             ${numInput(`seg_${key}_dist`,   'Distance (km)',    s.dist_km || 0)}
-            ${numInput(`seg_${key}_clear`,  'Time clear (min)', t.clear   || 0, 1)}
-            ${numInput(`seg_${key}_rain`,   'Time rain (min)',  t.rain    || 0, 1)}
-            ${numInput(`seg_${key}_severe`, 'Time severe (min)',t.severe  || 0, 1)}
+            ${numInput(`seg_${key}_clear`,  'Time clear (min)', t.clear   || 0, 1, 'Travel time under each weather condition: clear, rain, or severe weather')}
+            ${numInput(`seg_${key}_rain`,   'Time rain (min)',  t.rain    || 0, 1, 'Travel time under each weather condition: clear, rain, or severe weather')}
+            ${numInput(`seg_${key}_severe`, 'Time severe (min)',t.severe  || 0, 1, 'Travel time under each weather condition: clear, rain, or severe weather')}
           </div>`; })()
       : `<div class="grid-2">
           ${numInput(`seg_${key}_dist`, 'Distance (km)', s.dist_km  || 0)}
           ${numInput(`seg_${key}_time`, 'Time (min)',    s.time_min || 0, 1)}
         </div>`;
-    return `<div class="segment-block"><h4>${label}</h4>${inner}</div>`;
+    const tt = segTooltips[key] || '';
+    return `<div class="segment-block"><h4>${label}${tt ? tip(tt) : ''}</h4>${inner}</div>`;
   };
 
   document.getElementById('trip-editor').innerHTML = `
@@ -784,13 +810,13 @@ function renderTripEditor(data) {
     <div class="grid-2" style="margin-bottom:1rem">
       <div>
         <label style="font-weight:600;margin-bottom:0.4rem;display:block">From stop</label>
-        ${toggleRow('has_bus_stop',  'Bus available',  stopModes.bus)}
-        ${toggleRow('has_rail_stop', 'Rail available', stopModes.rail)}
+        ${toggleRow('has_bus_stop',  'Bus available',  stopModes.bus,  'Whether a bus service is available from the local stop')}
+        ${toggleRow('has_rail_stop', 'Rail available', stopModes.rail, 'Whether a rail service is available from the local stop')}
       </div>
       <div>
         <label style="font-weight:600;margin-bottom:0.4rem;display:block">From interchange</label>
-        ${toggleRow('has_bus_final',  'Bus available',  finalModes.bus)}
-        ${toggleRow('has_rail_final', 'Rail available', finalModes.rail)}
+        ${toggleRow('has_bus_final',  'Bus available',  finalModes.bus,  'Whether a bus service is available for the final leg from the interchange')}
+        ${toggleRow('has_rail_final', 'Rail available', finalModes.rail, 'Whether a rail service is available for the final leg from the interchange')}
       </div>
     </div>
     <h3>Segments</h3>
@@ -890,13 +916,22 @@ function renderPersonaPills(names) {
 }
 
 function renderPersonaEditor(data) {
+  const personaTooltips = {
+    CAR_AVAILABLE:   'Whether the persona has access to a private car',
+    NEEDS_STEP_FREE: 'Whether the persona requires step-free access (lifts, ramps) — affects the accessible service policy',
+    HAS_BUS_PASS:    'Whether the persona holds a free or concessionary bus pass (bus fare = 0)',
+    HAS_BIKE:        'Whether the persona owns a bicycle',
+    WALK_TOLERANCE:  'Maximum walking distance the persona is willing to accept, in metres',
+    BIKE_TOLERANCE:  'Maximum cycling distance the persona is willing to accept, in metres',
+    FARE_MAX:        'Maximum total fare the persona is willing to pay, in pence — journeys above this threshold are rejected',
+  };
   const boolKeys = Object.entries(data).filter(([k, v]) => typeof v === 'boolean' && k !== 'name');
   const numKeys  = Object.entries(data).filter(([k, v]) => typeof v === 'number');
   document.getElementById('persona-editor').innerHTML = `
     <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.5rem">
-      ${boolKeys.map(([k, v]) => toggleRow(`pcustom_${k}`, k, v)).join('')}
+      ${boolKeys.map(([k, v]) => toggleRow(`pcustom_${k}`, k, v, personaTooltips[k] || '')).join('')}
       <div class="grid-2" style="margin-top:0.8rem">
-        ${numKeys.map(([k, v]) => numInput(`pcustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1)).join('')}
+        ${numKeys.map(([k, v]) => numInput(`pcustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1, personaTooltips[k] || '')).join('')}
       </div>
     </div>`;
 }
@@ -997,11 +1032,22 @@ function renderScenarioPills(names) {
 }
 
 function renderScenarioEditor(data) {
+  const scenarioTooltips = {
+    MINOR_DELAY_PROB:                'Probability of a minor delay occurring at each service step',
+    MODERATE_DELAY_PROB:             'Probability of a moderate delay at each service step',
+    SEVERE_DELAY_PROB:               'Probability of a severe delay at each service step',
+    CANCEL_PROB:                     'Probability of a service cancellation at each step',
+    DISRUPTION_BUDGET:               'Maximum number of general disruption events allowed during the journey',
+    LIFT_BREAK_PROB:                 'Probability that a lift or elevator is out of service',
+    NO_ACCESSIBLE_BUS_PROB:          'Probability that no accessible bus is available at a given stop',
+    RAIN_PROB:                       'Probability of rain (increases walking and cycling times)',
+    SEVERE_WEATHER_PROB:             'Probability of severe weather (significantly increases all travel times)',
+  };
   const numKeys = Object.entries(data).filter(([k, v]) => typeof v === 'number');
   document.getElementById('scenario-editor').innerHTML = `
     <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.5rem">
       <div class="grid-2">
-        ${numKeys.map(([k, v]) => numInput(`scustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1)).join('')}
+        ${numKeys.map(([k, v]) => numInput(`scustom_${k}`, k, v, k.includes('PROB') ? 0.01 : 1, scenarioTooltips[k] || '')).join('')}
       </div>
     </div>`;
 }
@@ -1067,7 +1113,7 @@ async function initFactorsStep() {
   _initialized.factors = true;
   const [factorsData, policyData] = await Promise.all([
     api('/api/factors'),
-    api('/api/policy-config'),
+    api('/api/run-config'),
   ]);
   state.factorsData = factorsData;
   state.policyData  = policyData;
@@ -1077,19 +1123,39 @@ async function initFactorsStep() {
 }
 
 function renderPolicyEditor(data) {
-  const labels = {
+  const policyLabels = {
     ALLOW_NORMAL:             'Normal (no intervention)',
     ALLOW_HIGH_FREQ:          'High frequency service',
     ALLOW_LOW_FARE:           'Low fare subsidy',
     ALLOW_ROAD_CHARGE:        'Road charge surcharge',
     ALLOW_ACCESSIBLE_SERVICE: 'Accessible service',
   };
+  const policyTooltips = {
+    ALLOW_NORMAL:             'The manager may choose no intervention — the persona selects their mode freely',
+    ALLOW_HIGH_FREQ:          'The manager may apply a high-frequency service policy, reducing waiting times',
+    ALLOW_LOW_FARE:           'The manager may apply a low-fare subsidy, reducing bus and rail ticket prices',
+    ALLOW_ROAD_CHARGE:        'The manager may apply a road charge surcharge, adding cost to car and taxi journeys',
+    ALLOW_ACCESSIBLE_SERVICE: 'The manager may deploy an accessible service, improving step-free access for mobility-impaired personas',
+  };
+  const modeLabels = {
+    PT_ONLY: 'Public transport only (no car / taxi)',
+  };
+  const modeTooltips = {
+    PT_ONLY: 'Restricts all personas to public transport only — car and taxi actions are blocked at the model level',
+  };
+
+  const policyEntries = Object.entries(data).filter(([k]) => k.startsWith('ALLOW_'));
+  const modeEntries   = Object.entries(data).filter(([k]) => k in modeLabels);
+
   document.getElementById('policy-editor').innerHTML =
-    `<div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff">
-      ${Object.entries(data).map(([k, v]) =>
-        toggleRow(`policy_${k}`, labels[k] || k, v)
-      ).join('')}
-    </div>`;
+    `<div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff;margin-bottom:0.8rem">
+      ${policyEntries.map(([k, v]) => toggleRow(`policy_${k}`, policyLabels[k] || k, v, policyTooltips[k] || '')).join('')}
+    </div>
+    ${modeEntries.length ? `
+    <p style="font-size:0.78rem;font-weight:600;color:#555;margin:0.6rem 0 0.4rem">Mode restrictions</p>
+    <div style="border:1px solid #e8ecff;border-radius:7px;padding:0.8rem 1rem;background:#f9faff">
+      ${modeEntries.map(([k, v]) => toggleRow(`policy_${k}`, modeLabels[k], v, modeTooltips[k] || '')).join('')}
+    </div>` : ''}`;
 }
 
 function snapshotPolicy() {
@@ -1109,14 +1175,14 @@ function renderFactorsEditor(data) {
   document.getElementById('factors-editor').innerHTML = `
     <h3>Per-passenger-km (g CO₂e / pkm)</h3>
     <div class="grid-2">
-      ${numInput('f_taxi',  'Taxi (g/pkm)',           f.taxi,          0.01)}
-      ${numInput('f_bus',   'Local bus (g/pkm)',       f.local_bus,     0.01)}
-      ${numInput('f_rail',  'National rail (g/pkm)',   f.national_rail, 0.01)}
-      ${numInput('f_active','Active modes (g/pkm)',    f.active,        0.01)}
+      ${numInput('f_taxi',  'Taxi (g/pkm)',           f.taxi,          0.01, 'CO2e emission factor for taxi, in grams per passenger-kilometre (UK DfT 2025)')}
+      ${numInput('f_bus',   'Local bus (g/pkm)',       f.local_bus,     0.01, 'CO2e emission factor for local bus, in grams per passenger-kilometre (UK DfT 2025)')}
+      ${numInput('f_rail',  'National rail (g/pkm)',   f.national_rail, 0.01, 'CO2e emission factor for national rail, in grams per passenger-kilometre (UK DfT 2025)')}
+      ${numInput('f_active','Active modes (g/pkm)',    f.active,        0.01, 'CO2e emission factor for active modes (walking, cycling), in grams per passenger-kilometre — typically zero')}
     </div>
     <h3>Car</h3>
     <div class="grid-2">
-      ${numInput('f_car', 'Car (g CO₂e / vkm)', data.car_g_per_vkm, 0.01)}
+      ${numInput('f_car', 'Car (g CO₂e / vkm)', data.car_g_per_vkm, 0.01, 'CO2e emission factor for car, in grams per vehicle-kilometre (not per passenger)')}
     </div>`;
 }
 
@@ -1160,25 +1226,29 @@ async function loadFares() {
 
 function renderFaresEditor(data) {
   const b  = data.base_fares                          || {};
+  const tx = data.taxi                                || {};
   const lf = data.policy_overrides?.low_fare          || {};
   const rc = data.policy_overrides?.road_charge       || {};
   document.getElementById('fares-editor').innerHTML = `
     <h3>Base fares</h3>
     <div class="grid-2">
-      ${numInput('fare_bus',         'Bus (pence)',         b.bus          || 0, 1)}
-      ${numInput('fare_rail',        'Rail (pence)',        b.rail         || 0, 1)}
-      ${numInput('fare_taxi_direct', 'Taxi direct (pence)', b.taxi_direct  || 0, 1)}
-      ${numInput('fare_taxi_stop',   'Taxi from stop (p)',  b.taxi_stop    || 0, 1)}
-      ${numInput('fare_taxi_final',  'Taxi final leg (p)',  b.taxi_final   || 0, 1)}
+      ${numInput('fare_bus',         'Bus (pence)',         b.bus          || 0, 1, 'Standard single bus fare, in pence')}
+      ${numInput('fare_rail',        'Rail (pence)',        b.rail         || 0, 1, 'Standard single rail fare, in pence')}
+      ${numInput('fare_car_cpkm',    'Car (pence/km)',      (data.car?.cost_per_km) || 0, 1, 'Fuel-only marginal cost for car, in pence per kilometre')}
+    </div>
+    <h3>Taxi (fare = initial charge + price/km × distance)</h3>
+    <div class="grid-2">
+      ${numInput('fare_taxi_init', 'Initial charge (pence)', tx.initial_charge || 0, 1, 'Flag-fall charged at the start of every taxi journey')}
+      ${numInput('fare_taxi_pkm',  'Price per km (pence)',   tx.price_per_km   || 0, 1, 'Per-kilometre taxi rate; leg fares are computed from the trip distances in preprocessing')}
     </div>
     <h3>Policy: Low fare (policy = 2)</h3>
     <div class="grid-2">
-      ${numInput('fare_lf_bus',  'Bus subsidised (pence)',  lf.bus  || 0, 1)}
-      ${numInput('fare_lf_rail', 'Rail subsidised (pence)', lf.rail || 0, 1)}
+      ${numInput('fare_lf_bus',  'Bus subsidised (pence)',  lf.bus  || 0, 1, 'Subsidised bus fare applied when the low-fare policy is active')}
+      ${numInput('fare_lf_rail', 'Rail subsidised (pence)', lf.rail || 0, 1, 'Subsidised rail fare applied when the low-fare policy is active')}
     </div>
     <h3>Policy: Road charge surcharge (policy = 3)</h3>
     <div class="grid-2">
-      ${numInput('fare_rc_surge', 'Surcharge on all taxis (pence)', rc.surcharge || 0, 1)}
+      ${numInput('fare_rc_surge', 'Surcharge on all taxis (pence)', rc.surcharge || 0, 1, 'Extra cost in pence added to all taxi journeys when the road charge policy is active')}
     </div>`;
 }
 
@@ -1186,12 +1256,14 @@ function snapshotFares() {
   if (!state.faresData) return;
   state.faresData = {
     ...state.faresData,
+    car: { cost_per_km: getVal('fare_car_cpkm') ?? 0 },
+    taxi: {
+      initial_charge: getVal('fare_taxi_init') ?? 0,
+      price_per_km:   getVal('fare_taxi_pkm')  ?? 0,
+    },
     base_fares: {
-      bus:         getVal('fare_bus')         ?? 0,
-      rail:        getVal('fare_rail')        ?? 0,
-      taxi_direct: getVal('fare_taxi_direct') ?? 0,
-      taxi_stop:   getVal('fare_taxi_stop')   ?? 0,
-      taxi_final:  getVal('fare_taxi_final')  ?? 0,
+      bus:  getVal('fare_bus')  ?? 0,
+      rail: getVal('fare_rail') ?? 0,
     },
     policy_overrides: {
       low_fare:    { bus: getVal('fare_lf_bus') ?? 0, rail: getVal('fare_lf_rail') ?? 0 },

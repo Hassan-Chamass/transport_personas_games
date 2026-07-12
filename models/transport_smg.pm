@@ -19,15 +19,17 @@
 // Key design choices:
 //   - Manager acts exactly once at phase=0 (6-branch sampling of weather x acc_bus)
 //   - set_accessible_service guarantees acc_bus=true and halves LIFT_BREAK_PROB (3 branches: weather only)
-//   - Lift failure is an in-journey disruption embedded in board_rail/final_leg_rail probabilities
+//   - Lift failure is an in-journey disruption embedded in attempt_rail/attempt_final_rail probabilities
 //   - In-journey disruptions are probabilistic outcomes within persona's boarding actions
 //   - disruptions_used tracks budget; once exhausted, all service runs without disruption
 //   - done=true is absorbing (success at loc=3 or abandon via give_up)
-//   - FAIL_PENALTY=999 in time reward makes give_up never strategically optimal unless stuck
+//   - give_up carries no time penalty: R{"time"} measures actual travel time only.
+//     Divide by P(F loc=3) in post-processing to get E[time | success].
+//     Abandonment is quantified separately via P [F (done & abandon)].
 //
-// Note on fare reward: charged on every boarding attempt including failed ones (delay/cancel).
-//   fare_spent state variable tracks actual payments (successful boardings only).
-//   Discrepancy is at most 1 extra fare per disrupted leg (small for DISRUPTION_BUDGET<=2).
+// Boarding is split into attempt_* / ride_* actions: attempt resolves the service
+//   outcome, ride (forced when pending>0) performs the leg and carries the rewards,
+//   so time/co2e/fare are only charged on legs actually travelled.
 // ============================================================
 
 smg
@@ -41,8 +43,9 @@ player persona
     m_persona,
     [done_loop], [give_up],
     [choose_car], [taxi_direct], [bike_direct], [walk_to_destination], [walk_to_stop],
-    [board_bus], [board_rail], [wait_at_stop], [taxi_from_stop],
-    [final_leg_bus], [final_leg_rail], [final_leg_walk], [final_leg_taxi]
+    [attempt_bus], [ride_bus], [attempt_rail], [ride_rail], [wait_at_stop], [taxi_from_stop],
+    [attempt_final_bus], [ride_final_bus], [attempt_final_rail], [ride_final_rail],
+    [final_leg_walk], [final_leg_taxi]
 endplayer
 
 global phase : [0..1] init 0;
@@ -71,28 +74,18 @@ const double NO_ACCESSIBLE_BUS_PROB;
 const double RAIN_PROB;
 const double SEVERE_WEATHER_PROB;
 
-// Legacy constants (removed from new model logic; kept for backward compatibility with old scenario JSONs)
-const double ASSIST_ALLOC_PROB              ;
-const int    ACCESSIBILITY_DISRUPTION_BUDGET;
-const int    WEATHER_DISRUPTION_BUDGET      ;
-
 // -------------------------------------------------------
-// Constants -- Policy availability (supplied via params/policy_config.json)
-// Set a flag to false to disable that policy for the manager.
-// At least one must be true or the model deadlocks at phase=0.
+// Constants -- Run config (supplied via params/run_config.json)
+// Set a policy flag to false to disable that policy for the manager.
+// At least one ALLOW_* must be true or the model deadlocks at phase=0.
+// PT_ONLY=true disables car and taxi for all personas (PT-only experiment).
 // -------------------------------------------------------
 const bool ALLOW_NORMAL;
 const bool ALLOW_HIGH_FREQ;
 const bool ALLOW_LOW_FARE;
 const bool ALLOW_ROAD_CHARGE;
 const bool ALLOW_ACCESSIBLE_SERVICE;
-
-// -------------------------------------------------------
-// Failure penalty
-// 999 min >> any realistic journey time; give_up is never
-// strategically preferred over any valid transport option
-// -------------------------------------------------------
-const int FAIL_PENALTY = 999;
+const bool PT_ONLY;
 
 // -------------------------------------------------------
 // Constants -- Trip geometry (supplied via preprocessing.py)
@@ -135,6 +128,7 @@ const int RAIL_FARE_LOW;
 const int TAXI_DIRECT_FARE_BASE;
 const int TAXI_STOP_FARE_BASE;
 const int TAXI_FINAL_FARE_BASE;
+const int CAR_COST;
 const int ROAD_CHARGE_SURCHARGE;
 
 // Mode availability flags (supplied via preprocessing.py)
@@ -151,6 +145,7 @@ formula road_congestion = weather=2 ? 2 : (weather=1 ? 1 : 0);
 
 formula bus_fare         = HAS_BUS_PASS ? 0 : (policy=2 ? BUS_FARE_LOW : BUS_FARE_BASE);
 formula rail_fare        = policy=2 ? RAIL_FARE_LOW : RAIL_FARE_BASE;
+formula car_cost         = policy=3 ? CAR_COST+ROAD_CHARGE_SURCHARGE : CAR_COST;
 formula taxi_direct_fare = policy=3 ? TAXI_DIRECT_FARE_BASE+ROAD_CHARGE_SURCHARGE : TAXI_DIRECT_FARE_BASE;
 formula taxi_stop_fare   = policy=3 ? TAXI_STOP_FARE_BASE+ROAD_CHARGE_SURCHARGE   : TAXI_STOP_FARE_BASE;
 formula taxi_final_fare  = policy=3 ? TAXI_FINAL_FARE_BASE+ROAD_CHARGE_SURCHARGE  : TAXI_FINAL_FARE_BASE;
@@ -162,7 +157,6 @@ formula eff_delay  = policy=1 ? (MINOR_DELAY_PROB + MODERATE_DELAY_PROB + SEVERE
 formula eff_ok     = 1.0 - eff_cancel - eff_delay;
 
 // Lift failure probability -- in-journey disruption for rail, affects NEEDS_STEP_FREE personas only
-// accessible_service (policy=4) halves the base probability; all other policies use LIFT_BREAK_PROB
 formula eff_lift_fail = NEEDS_STEP_FREE ? (policy=4 ? LIFT_BREAK_PROB*0.5 : LIFT_BREAK_PROB) : 0.0;
 
 // Average delay duration (minutes) -- weighted by relative probability of each delay tier
@@ -177,8 +171,8 @@ formula avg_wait_time =
 // Used to gate give_up -- persona can only abandon when genuinely trapped
 
 formula stuck_home =
-    !CAR_AVAILABLE
-    & fare_spent+taxi_direct_fare>FARE_MAX
+    (!CAR_AVAILABLE | PT_ONLY)
+    & (fare_spent+taxi_direct_fare>FARE_MAX | PT_ONLY)
     & (!HAS_BIKE | weather!=0 | BIKE_TOLERANCE<DIST_HOME_TO_DEST)
     & WALK_TOLERANCE<DIST_HOME_TO_DEST
     & WALK_TOLERANCE<DIST_HOME_TO_STOP;
@@ -187,14 +181,14 @@ formula stuck_stop =
     service_status!=1
     & !(service_status=0 & HAS_BUS_STOP & (!NEEDS_STEP_FREE|acc_bus) & (HAS_BUS_PASS|fare_spent+bus_fare<=FARE_MAX))
     & !(service_status=0 & HAS_RAIL_STOP & fare_spent+rail_fare<=FARE_MAX)
-    & fare_spent+taxi_stop_fare>FARE_MAX;
+    & (fare_spent+taxi_stop_fare>FARE_MAX | PT_ONLY);
 
 formula stuck_interchange =
     service_status!=1
     & !(service_status=0 & HAS_BUS_FINAL  & (!NEEDS_STEP_FREE|acc_bus) & (HAS_BUS_PASS|fare_spent+bus_fare<=FARE_MAX))
     & !(service_status=0 & HAS_RAIL_FINAL & fare_spent+rail_fare<=FARE_MAX)
     & WALK_TOLERANCE<DIST_INTERCHANGE_TO_DEST
-    & fare_spent+taxi_final_fare>FARE_MAX;
+    & (fare_spent+taxi_final_fare>FARE_MAX | PT_ONLY);
 
 // Manager sampling branch probabilities (weather x acc_bus are independent)
 formula p_w0 = 1.0 - RAIN_PROB - SEVERE_WEATHER_PROB;
@@ -244,7 +238,7 @@ module m_manager
       + p_w2*p_ab : (policy'=2)&(weather'=2)&(acc_bus'=true) &(phase'=1)
       + p_w2*p_nb : (policy'=2)&(weather'=2)&(acc_bus'=false)&(phase'=1);
 
-    // set_road_charge (policy=3): adds surcharge to all taxi fares (discourages private hire)
+    // set_road_charge (policy=3): adds surcharge to car and taxi journeys (discourages private motor traffic)
     [set_road_charge] phase=0 & ALLOW_ROAD_CHARGE ->
         p_w0*p_ab : (policy'=3)&(weather'=0)&(acc_bus'=true) &(phase'=1)
       + p_w0*p_nb : (policy'=3)&(weather'=0)&(acc_bus'=false)&(phase'=1)
@@ -265,13 +259,14 @@ endmodule
 
 // -------------------------------------------------------
 // Module m_persona
-// Owns: loc, mode, done, abandon, service_status, disruptions_used, fare_spent
+// Owns: loc, mode, done, abandon, service_status, disruptions_used, fare_spent, pending
 // Reads: phase (global), policy/weather/acc_bus (from m_manager state)
 // Acts at phase=1; loops until done=true
 //
 // service_status: 0=normal  1=delayed (resolved by wait_at_stop)  2=cancelled
 // disruptions_used: counts disruptions consumed against DISRUPTION_BUDGET
 // fare_spent: tracks cumulative fare actually paid (updated on successful boarding only)
+// pending: service arrived, ride pending (1=bus, 2=rail)
 // -------------------------------------------------------
 module m_persona
 
@@ -282,6 +277,7 @@ module m_persona
     service_status   : [0..2]              init 0;
     disruptions_used : [0..DISRUPTION_BUDGET] init 0;
     fare_spent       : [0..6000]           init 0;
+    pending          : [0..2]              init 0;
 
     // -------------------------------------------------------
     // Terminal: journey complete (loc=3) or abandoned (give_up)
@@ -293,7 +289,7 @@ module m_persona
     // Give up: only available when no other action is enabled at the current location
     // (stuck_home / stuck_stop / stuck_interchange formulas encode this condition)
     // -------------------------------------------------------
-    [give_up] phase=1 & !done
+    [give_up] phase=1 & !done & pending=0
               & ((loc=0 & stuck_home) | (loc=1 & stuck_stop) | (loc=2 & stuck_interchange))
               -> (done'=true) & (abandon'=true);
 
@@ -303,11 +299,11 @@ module m_persona
     // -------------------------------------------------------
 
     // Car (direct)
-    [choose_car] phase=1 & loc=0 & !done & CAR_AVAILABLE
+    [choose_car] phase=1 & loc=0 & !done & CAR_AVAILABLE & !PT_ONLY
         -> (loc'=3) & (mode'=1) & (done'=true);
 
     // Taxi direct
-    [taxi_direct] phase=1 & loc=0 & !done & fare_spent+taxi_direct_fare<=FARE_MAX
+    [taxi_direct] phase=1 & loc=0 & !done & !PT_ONLY & fare_spent+taxi_direct_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_direct_fare) & (done'=true);
 
     // Bike direct (clear weather only)
@@ -325,53 +321,61 @@ module m_persona
 
     // -------------------------------------------------------
     // At stop (loc=1)
-    // board_bus/board_rail: two variants per service to handle disruption budget cleanly
+    // attempt_* resolves the service outcome; ride_* (only action when pending>0)
+    //   performs the leg and carries the rewards.
+    // Two attempt variants per service handle the disruption budget:
     //   Variant A (disruptions_used < DISRUPTION_BUDGET): probabilistic outcome
     //   Variant B (disruptions_used >= DISRUPTION_BUDGET): service always runs
     // Guards on the two variants are mutually exclusive -- no nondeterminism between them
     // -------------------------------------------------------
 
-    // Board bus -- variant A (disruption budget remaining)
-    [board_bus] phase=1 & loc=1 & !done & service_status=0
+    // Attempt bus -- variant A (disruption budget remaining)
+    [attempt_bus] phase=1 & loc=1 & !done & pending=0 & service_status=0
                 & HAS_BUS_STOP
                 & disruptions_used<DISRUPTION_BUDGET
                 & (!NEEDS_STEP_FREE | acc_bus)
                 & (HAS_BUS_PASS | fare_spent+bus_fare<=FARE_MAX)
-        -> eff_ok     : (loc'=2) & (mode'=3) & (fare_spent'=fare_spent+bus_fare)
+        -> eff_ok     : (pending'=1)
          + eff_delay  : (service_status'=1) & (disruptions_used'=disruptions_used+1)
          + eff_cancel : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Board bus -- variant B (budget exhausted; service guaranteed to run)
-    [board_bus] phase=1 & loc=1 & !done & service_status=0
+    // Attempt bus -- variant B (budget exhausted; service guaranteed to run)
+    [attempt_bus] phase=1 & loc=1 & !done & pending=0 & service_status=0
                 & HAS_BUS_STOP
                 & disruptions_used>=DISRUPTION_BUDGET
                 & (!NEEDS_STEP_FREE | acc_bus)
                 & (HAS_BUS_PASS | fare_spent+bus_fare<=FARE_MAX)
-        -> (loc'=2) & (mode'=3) & (fare_spent'=fare_spent+bus_fare);
+        -> (pending'=1);
 
-    // Board rail -- variant A
-    // eff_lift_fail absorbed into cancel outcome (same result: service_status=2, persona retries)
-    [board_rail] phase=1 & loc=1 & !done & service_status=0
+    [ride_bus] phase=1 & loc=1 & pending=1
+        -> (loc'=2) & (mode'=3) & (fare_spent'=fare_spent+bus_fare) & (pending'=0);
+
+    // Attempt rail -- variant A
+    // Lift failure folded into the cancel outcome, conditioned on the service running
+    [attempt_rail] phase=1 & loc=1 & !done & pending=0 & service_status=0
                  & HAS_RAIL_STOP
                  & disruptions_used<DISRUPTION_BUDGET
                  & fare_spent+rail_fare<=FARE_MAX
-        -> eff_ok-eff_lift_fail             : (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare)
-         + eff_delay                        : (service_status'=1) & (disruptions_used'=disruptions_used+1)
-         + eff_cancel+eff_lift_fail         : (service_status'=2) & (disruptions_used'=disruptions_used+1);
+        -> eff_ok*(1-eff_lift_fail)             : (pending'=2)
+         + eff_delay                            : (service_status'=1) & (disruptions_used'=disruptions_used+1)
+         + eff_cancel+eff_ok*eff_lift_fail      : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Board rail -- variant B (budget exhausted; lift failure also suppressed)
-    [board_rail] phase=1 & loc=1 & !done & service_status=0
+    // Attempt rail -- variant B (budget exhausted; lift failure also suppressed)
+    [attempt_rail] phase=1 & loc=1 & !done & pending=0 & service_status=0
                  & HAS_RAIL_STOP
                  & disruptions_used>=DISRUPTION_BUDGET
                  & fare_spent+rail_fare<=FARE_MAX
-        -> (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare);
+        -> (pending'=2);
+
+    [ride_rail] phase=1 & loc=1 & pending=2
+        -> (loc'=2) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (pending'=0);
 
     // Wait at stop: resolves a delay (service_status=1 -> 0) before retrying
-    [wait_at_stop] phase=1 & loc=1 & !done & service_status=1
+    [wait_at_stop] phase=1 & loc=1 & !done & pending=0 & service_status=1
         -> (service_status'=0);
 
     // Taxi from stop
-    [taxi_from_stop] phase=1 & loc=1 & !done & fare_spent+taxi_stop_fare<=FARE_MAX
+    [taxi_from_stop] phase=1 & loc=1 & !done & pending=0 & !PT_ONLY & fare_spent+taxi_stop_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_stop_fare) & (done'=true);
 
 
@@ -379,50 +383,56 @@ module m_persona
     // At interchange (loc=2)
     // -------------------------------------------------------
 
-    // Final leg bus -- variant A
-    [final_leg_bus] phase=1 & loc=2 & !done & service_status=0
+    // Attempt final leg bus -- variant A
+    [attempt_final_bus] phase=1 & loc=2 & !done & pending=0 & service_status=0
                     & HAS_BUS_FINAL
                     & disruptions_used<DISRUPTION_BUDGET
                     & (!NEEDS_STEP_FREE | acc_bus)
                     & (HAS_BUS_PASS | fare_spent+bus_fare<=FARE_MAX)
-        -> eff_ok     : (loc'=3) & (mode'=3) & (fare_spent'=fare_spent+bus_fare) & (done'=true)
+        -> eff_ok     : (pending'=1)
          + eff_delay  : (service_status'=1) & (disruptions_used'=disruptions_used+1)
          + eff_cancel : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Final leg bus -- variant B
-    [final_leg_bus] phase=1 & loc=2 & !done & service_status=0
+    // Attempt final leg bus -- variant B
+    [attempt_final_bus] phase=1 & loc=2 & !done & pending=0 & service_status=0
                     & HAS_BUS_FINAL
                     & disruptions_used>=DISRUPTION_BUDGET
                     & (!NEEDS_STEP_FREE | acc_bus)
                     & (HAS_BUS_PASS | fare_spent+bus_fare<=FARE_MAX)
-        -> (loc'=3) & (mode'=3) & (fare_spent'=fare_spent+bus_fare) & (done'=true);
+        -> (pending'=1);
 
-    // Final leg rail -- variant A
-    [final_leg_rail] phase=1 & loc=2 & !done & service_status=0
+    [ride_final_bus] phase=1 & loc=2 & pending=1
+        -> (loc'=3) & (mode'=3) & (fare_spent'=fare_spent+bus_fare) & (pending'=0) & (done'=true);
+
+    // Attempt final leg rail -- variant A
+    [attempt_final_rail] phase=1 & loc=2 & !done & pending=0 & service_status=0
                      & HAS_RAIL_FINAL
                      & disruptions_used<DISRUPTION_BUDGET
                      & fare_spent+rail_fare<=FARE_MAX
-        -> eff_ok-eff_lift_fail         : (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (done'=true)
-         + eff_delay                    : (service_status'=1) & (disruptions_used'=disruptions_used+1)
-         + eff_cancel+eff_lift_fail     : (service_status'=2) & (disruptions_used'=disruptions_used+1);
+        -> eff_ok*(1-eff_lift_fail)             : (pending'=2)
+         + eff_delay                            : (service_status'=1) & (disruptions_used'=disruptions_used+1)
+         + eff_cancel+eff_ok*eff_lift_fail      : (service_status'=2) & (disruptions_used'=disruptions_used+1);
 
-    // Final leg rail -- variant B (budget exhausted; lift failure also suppressed)
-    [final_leg_rail] phase=1 & loc=2 & !done & service_status=0
+    // Attempt final leg rail -- variant B (budget exhausted; lift failure also suppressed)
+    [attempt_final_rail] phase=1 & loc=2 & !done & pending=0 & service_status=0
                      & HAS_RAIL_FINAL
                      & disruptions_used>=DISRUPTION_BUDGET
                      & fare_spent+rail_fare<=FARE_MAX
-        -> (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (done'=true);
+        -> (pending'=2);
+
+    [ride_final_rail] phase=1 & loc=2 & pending=2
+        -> (loc'=3) & (mode'=5) & (fare_spent'=fare_spent+rail_fare) & (pending'=0) & (done'=true);
 
     // Wait at interchange: resolves delay
-    [wait_at_stop] phase=1 & loc=2 & !done & service_status=1
+    [wait_at_stop] phase=1 & loc=2 & !done & pending=0 & service_status=1
         -> (service_status'=0);
 
     // Final leg walk
-    [final_leg_walk] phase=1 & loc=2 & !done & WALK_TOLERANCE>=DIST_INTERCHANGE_TO_DEST
+    [final_leg_walk] phase=1 & loc=2 & !done & pending=0 & WALK_TOLERANCE>=DIST_INTERCHANGE_TO_DEST
         -> (loc'=3) & (mode'=2) & (done'=true);
 
     // Final leg taxi
-    [final_leg_taxi] phase=1 & loc=2 & !done & fare_spent+taxi_final_fare<=FARE_MAX
+    [final_leg_taxi] phase=1 & loc=2 & !done & pending=0 & !PT_ONLY & fare_spent+taxi_final_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_final_fare) & (done'=true);
 
 endmodule
@@ -448,13 +458,12 @@ rewards "time"
     [bike_direct]         true      :  TIME_BIKE_DIRECT;
     [walk_to_destination] true      :  TIME_WALK_TO_DEST;
     [walk_to_stop]        true      :  TIME_WALK_TO_STOP;
-    [board_bus]           true      :  TIME_BUS_STOP_TO_INT;
-    [board_rail]          true      :  TIME_RAIL_STOP_TO_INT;
-    [final_leg_bus]       true      :  TIME_FINAL_BUS;
-    [final_leg_rail]      true      :  TIME_FINAL_RAIL;
+    [ride_bus]            true      :  TIME_BUS_STOP_TO_INT;
+    [ride_rail]           true      :  TIME_RAIL_STOP_TO_INT;
+    [ride_final_bus]      true      :  TIME_FINAL_BUS;
+    [ride_final_rail]     true      :  TIME_FINAL_RAIL;
     [final_leg_walk]      true      :  TIME_FINAL_WALK;
     [wait_at_stop]        true      :  avg_wait_time;
-    [give_up]             true      :  FAIL_PENALTY;
 endrewards
 
 // -------------------------------------------------------
@@ -468,10 +477,10 @@ rewards "co2e"
     [taxi_direct]         true :  CO2E_TAXI_DIRECT;
     [taxi_from_stop]      true :  CO2E_TAXI_STOP;
     [final_leg_taxi]      true :  CO2E_TAXI_FINAL;
-    [board_bus]           true :  CO2E_BUS_STOP_TO_INT;
-    [board_rail]          true :  CO2E_RAIL_STOP_TO_INT;
-    [final_leg_bus]       true :  CO2E_BUS_FINAL;
-    [final_leg_rail]      true :  CO2E_RAIL_FINAL;
+    [ride_bus]            true :  CO2E_BUS_STOP_TO_INT;
+    [ride_rail]           true :  CO2E_RAIL_STOP_TO_INT;
+    [ride_final_bus]      true :  CO2E_BUS_FINAL;
+    [ride_final_rail]     true :  CO2E_RAIL_FINAL;
     [bike_direct]         true :     0;
     [walk_to_destination] true :     0;
     [walk_to_stop]        true :     0;
@@ -483,20 +492,19 @@ endrewards
 //
 // Policy effects:
 //   policy=2 (low_fare):   bus_fare=100p, rail_fare=200p
-//   policy=3 (road_charge): taxi fares +500p
+//   policy=3 (road_charge): car and taxi +500p
 //   HAS_BUS_PASS:           bus_fare=0p regardless of policy
 //
-// Note: charged on every boarding attempt (including failed delay/cancel outcomes).
-//   fare_spent state variable tracks only successful boarding payments.
 // -------------------------------------------------------
 rewards "fare"
-    [board_bus]      true : bus_fare;
-    [board_rail]     true : rail_fare;
-    [taxi_direct]    true : taxi_direct_fare;
-    [taxi_from_stop] true : taxi_stop_fare;
-    [final_leg_bus]  true : bus_fare;
-    [final_leg_rail] true : rail_fare;
-    [final_leg_taxi] true : taxi_final_fare;
+    [choose_car]      true : car_cost;
+    [ride_bus]        true : bus_fare;
+    [ride_rail]       true : rail_fare;
+    [taxi_direct]     true : taxi_direct_fare;
+    [taxi_from_stop]  true : taxi_stop_fare;
+    [ride_final_bus]  true : bus_fare;
+    [ride_final_rail] true : rail_fare;
+    [final_leg_taxi]  true : taxi_final_fare;
 endrewards
 
 // -------------------------------------------------------

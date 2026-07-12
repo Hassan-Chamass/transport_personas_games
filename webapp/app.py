@@ -35,7 +35,7 @@ PARAMS_DIR   = BASE_DIR / "params"
 STATIC_DIR   = Path(__file__).resolve().parent / "static"
 SCRIPTS_DIR  = BASE_DIR / "scripts"
 PROPS_FILE          = BASE_DIR / "props" / "transport_smg.props"
-POLICY_CONFIG_FILE  = PARAMS_DIR / "policy_config.json"
+POLICY_CONFIG_FILE  = PARAMS_DIR / "run_config.json"
 
 # Make scripts importable (preprocessing.py lives there)
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -223,8 +223,8 @@ def get_fares(trip):
 
 # ── Policy config ─────────────────────────────────────────────────────────────
 
-@app.route("/api/policy-config")
-def get_policy_config():
+@app.route("/api/run-config")
+def get_run_config():
     return jsonify(_load_json(POLICY_CONFIG_FILE))
 
 

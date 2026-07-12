@@ -18,11 +18,11 @@ from pathlib import Path
 
 # ── Update this list when transport_smg.pm variables change ──────────────────
 # Current model: phase (global) | policy, weather, acc_bus | loc, mode, done,
-#                abandon, service_status, disruptions_used, fare_spent
+#                abandon, service_status, disruptions_used, fare_spent, pending
 STATE_VARS = [
     "phase", "policy", "weather", "acc_bus",
     "loc", "mode", "done", "abandon",
-    "service_status", "disruptions_used", "fare_spent",
+    "service_status", "disruptions_used", "fare_spent", "pending",
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,11 @@ def parse_tuple(raw):
     return vals
 
 def decode(vals):
+    if len(vals) != len(STATE_VARS):
+        raise ValueError(
+            f"State tuple has {len(vals)} values but STATE_VARS lists {len(STATE_VARS)} names. "
+            "Update STATE_VARS to match transport_smg.pm (see header comment)."
+        )
     return dict(zip(STATE_VARS, vals))
 
 def make_label(sid, d):
@@ -55,6 +60,7 @@ def make_label(sid, d):
     if d.get("service_status", 0) != 0:  extras.append(f"svc={SVC[d['service_status']]}")
     if d.get("disruptions_used", 0) > 0: extras.append(f"disrupt={d['disruptions_used']}")
     if d.get("fare_spent", 0) > 0:       extras.append(f"fare={d['fare_spent']}p")
+    if d.get("pending", 0) > 0:          extras.append(f"boarding {'bus' if d['pending']==1 else 'rail'}")
     if extras:
         lines.append(" | ".join(extras))
     if d.get("done"):

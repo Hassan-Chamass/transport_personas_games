@@ -25,10 +25,18 @@ def _load(path: Path) -> dict:
 
 def get_trip_constants(trip: str = "giffnock_glasgow",
                        fares: str = "giffnock_glasgow_fares") -> dict[str, int | float]:
-    factors = _load(PARAMS_DIR / "dft_factors.json")
-    trip_data = _load(PARAMS_DIR / "trip" / f"{trip}.json")
+    """Load the JSON config files then delegate to get_trip_constants_from_data."""
+    factors    = _load(PARAMS_DIR / "dft_factors.json")
+    trip_data  = _load(PARAMS_DIR / "trip" / f"{trip}.json")
     fares_data = _load(PARAMS_DIR / "fares" / f"{fares}.json")
+    return get_trip_constants_from_data(trip_data, fares_data, factors)
 
+
+def get_trip_constants_from_data(trip_data: dict, fares_data: dict,
+                                 factors: dict) -> dict[str, int | float]:
+    """Compute PRISM constants from raw JSON dicts.
+    Single source of truth, used by run_all.py (via get_trip_constants)
+    and by the webapp (which passes user-edited dicts directly)."""
     seg   = trip_data["segments"]
     stop_modes  = trip_data.get("available_modes_from_stop",       {"bus": True, "rail": True})
     final_modes = trip_data.get("available_modes_from_interchange", {"bus": True})
@@ -44,6 +52,9 @@ def get_trip_constants(trip: str = "giffnock_glasgow",
     lf    = fares_data["policy_overrides"]["low_fare"]
     rc    = fares_data["policy_overrides"]["road_charge"]
     surge = rc["surcharge"]
+    car_cost_per_km = fares_data.get("car", {}).get("cost_per_km", 0)
+    taxi_init  = fares_data["taxi"]["initial_charge"]
+    taxi_pkm   = fares_data["taxi"]["price_per_km"]
 
     consts: dict[str, int | float] = {
         # --- distance constants (metres) ---
@@ -88,16 +99,17 @@ def get_trip_constants(trip: str = "giffnock_glasgow",
         "BUS_FARE_LOW":               lf["bus"],
         "RAIL_FARE_BASE":             base["rail"],
         "RAIL_FARE_LOW":              lf["rail"],
-        "TAXI_DIRECT_FARE_BASE":      base["taxi_direct"],
-        "TAXI_STOP_FARE_BASE":        base["taxi_stop"],
-        "TAXI_FINAL_FARE_BASE":       base["taxi_final"],
+        "TAXI_DIRECT_FARE_BASE":      round(taxi_init + seg["taxi_direct"]["dist_km"]    * taxi_pkm),
+        "TAXI_STOP_FARE_BASE":        round(taxi_init + seg["taxi_from_stop"]["dist_km"] * taxi_pkm),
+        "TAXI_FINAL_FARE_BASE":       round(taxi_init + seg["taxi_final_leg"]["dist_km"] * taxi_pkm),
+        "CAR_COST":                   round(seg["car_direct"]["dist_km"] * car_cost_per_km),
         "ROAD_CHARGE_SURCHARGE":      surge,
 
         # --- mode availability flags ---
-        "HAS_BUS_STOP":  "true" if stop_modes["bus"]    else "false",
-        "HAS_RAIL_STOP": "true" if stop_modes["rail"]   else "false",
-        "HAS_BUS_FINAL": "true" if final_modes["bus"]   else "false",
-        "HAS_RAIL_FINAL":"true" if final_modes["rail"]  else "false",
+        "HAS_BUS_STOP":  "true" if stop_modes.get("bus",   True)  else "false",
+        "HAS_RAIL_STOP": "true" if stop_modes.get("rail",  True)  else "false",
+        "HAS_BUS_FINAL": "true" if final_modes.get("bus",  True)  else "false",
+        "HAS_RAIL_FINAL":"true" if final_modes.get("rail", False) else "false",
     }
 
     return consts

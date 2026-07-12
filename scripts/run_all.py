@@ -30,7 +30,7 @@ parser.add_argument("--scenario",   nargs="+")
 parser.add_argument("--props-file", default="transport_smg")
 parser.add_argument("--trip",          default="giffnock_glasgow",       help="Trip config name (params/trip/)")
 parser.add_argument("--fares",         default="giffnock_glasgow_fares", help="Fares config name (params/fares/)")
-parser.add_argument("--policy-config", default="policy_config",          help="Policy availability config (params/policy_config.json)")
+parser.add_argument("--policy-config", default="run_config",              help="Run config (params/run_config.json)")
 parser.add_argument("--exportstrat", action="store_true",                help="Export optimal strategy as .dot file")
 args = parser.parse_args()
 

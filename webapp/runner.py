@@ -12,7 +12,7 @@ import subprocess
 import re
 import os
 from pathlib import Path
-from preprocessing import get_trip_constants, to_prism_const_string
+from preprocessing import get_trip_constants_from_data, to_prism_const_string
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 PRISM_EXE   = r"C:\prism-games\bin\prism.bat"
@@ -93,84 +93,6 @@ def build_const_string(
 
     parts = [trip_str, persona_str, scenario_str, policy_str]
     return ",".join(p for p in parts if p)
-
-
-def get_trip_constants_from_data(trip_data: dict, fares_data: dict, factors_data: dict) -> dict:
-    """
-    Recompute PRISM trip constants from raw JSON dicts (user may have edited values).
-    Mirrors the logic in preprocessing.py but accepts dicts directly instead of file paths.
-    """
-    seg   = trip_data["segments"]
-    stop_modes  = trip_data.get("available_modes_from_stop",        {"bus": True, "rail": True})
-    final_modes = trip_data.get("available_modes_from_interchange",  {"bus": True, "rail": False})
-
-    f_taxi = factors_data["factors_g_per_pkm"]["taxi"]
-    f_bus  = factors_data["factors_g_per_pkm"]["local_bus"]
-    f_rail = factors_data["factors_g_per_pkm"]["national_rail"]
-    f_car  = factors_data["car_g_per_vkm"]
-
-    def co2e(dist_km: float, factor: float) -> int:
-        return round(dist_km * factor)
-
-    base  = fares_data["base_fares"]
-    lf    = fares_data["policy_overrides"]["low_fare"]
-    rc    = fares_data["policy_overrides"]["road_charge"]
-    surge = rc["surcharge"]
-
-    return {
-        # Distance (metres)
-        "DIST_HOME_TO_STOP":        round(seg["walk_to_stop"]["dist_km"] * 1000),
-        "DIST_INTERCHANGE_TO_DEST": round(seg["walk_interchange_to_dest"]["dist_km"] * 1000),
-        "DIST_HOME_TO_DEST":        round(seg["walk_direct"]["dist_km"] * 1000),
-
-        # CO2e (grams)
-        "CO2E_CAR_DIRECT":      co2e(seg["car_direct"]["dist_km"],                   f_car),
-        "CO2E_TAXI_DIRECT":     co2e(seg["taxi_direct"]["dist_km"],                  f_taxi),
-        "CO2E_TAXI_STOP":       co2e(seg["taxi_from_stop"]["dist_km"],               f_taxi),
-        "CO2E_TAXI_FINAL":      co2e(seg["taxi_final_leg"]["dist_km"],               f_taxi),
-        "CO2E_BUS_STOP_TO_INT": co2e(seg["bus_stop_to_interchange"]["dist_km"],      f_bus),
-        "CO2E_RAIL_STOP_TO_INT":co2e(seg["rail_stop_to_interchange"]["dist_km"],     f_rail),
-        "CO2E_BUS_FINAL":       co2e(seg["bus_interchange_to_dest"]["dist_km"],      f_bus),
-        "CO2E_RAIL_FINAL":      co2e(seg["rail_interchange_to_dest"]["dist_km"],     f_rail),
-
-        # Time (minutes)
-        "TIME_CAR_CLEAR":          seg["car_direct"]["time_min"]["clear"],
-        "TIME_CAR_RAIN":           seg["car_direct"]["time_min"]["rain"],
-        "TIME_CAR_SEVERE":         seg["car_direct"]["time_min"]["severe"],
-        "TIME_TAXI_DIRECT_CLEAR":  seg["taxi_direct"]["time_min"]["clear"],
-        "TIME_TAXI_DIRECT_RAIN":   seg["taxi_direct"]["time_min"]["rain"],
-        "TIME_TAXI_DIRECT_SEVERE": seg["taxi_direct"]["time_min"]["severe"],
-        "TIME_TAXI_STOP_CLEAR":    seg["taxi_from_stop"]["time_min"]["clear"],
-        "TIME_TAXI_STOP_RAIN":     seg["taxi_from_stop"]["time_min"]["rain"],
-        "TIME_TAXI_STOP_SEVERE":   seg["taxi_from_stop"]["time_min"]["severe"],
-        "TIME_TAXI_FINAL_CLEAR":   seg["taxi_final_leg"]["time_min"]["clear"],
-        "TIME_TAXI_FINAL_RAIN":    seg["taxi_final_leg"]["time_min"]["rain"],
-        "TIME_TAXI_FINAL_SEVERE":  seg["taxi_final_leg"]["time_min"]["severe"],
-        "TIME_BUS_STOP_TO_INT":    seg["bus_stop_to_interchange"]["time_min"],
-        "TIME_RAIL_STOP_TO_INT":   seg["rail_stop_to_interchange"]["time_min"],
-        "TIME_FINAL_BUS":          seg["bus_interchange_to_dest"]["time_min"],
-        "TIME_FINAL_RAIL":         seg["rail_interchange_to_dest"]["time_min"],
-        "TIME_FINAL_WALK":         seg["walk_interchange_to_dest"]["time_min"],
-        "TIME_WALK_TO_STOP":       seg["walk_to_stop"]["time_min"],
-        "TIME_BIKE_DIRECT":        seg["bike_direct"]["time_min"],
-        "TIME_WALK_TO_DEST":       seg["walk_direct"]["time_min"],
-
-        # Fares (pence)
-        "BUS_FARE_BASE":         base["bus"],
-        "BUS_FARE_LOW":          lf["bus"],
-        "RAIL_FARE_BASE":        base["rail"],
-        "RAIL_FARE_LOW":         lf["rail"],
-        "TAXI_DIRECT_FARE_BASE": base["taxi_direct"],
-        "TAXI_STOP_FARE_BASE":   base["taxi_stop"],
-        "TAXI_FINAL_FARE_BASE":  base["taxi_final"],
-        "ROAD_CHARGE_SURCHARGE": surge,
-
-        # Mode availability
-        "HAS_BUS_STOP":  "true" if stop_modes.get("bus",   True)  else "false",
-        "HAS_RAIL_STOP": "true" if stop_modes.get("rail",  True)  else "false",
-        "HAS_BUS_FINAL": "true" if final_modes.get("bus",  True)  else "false",
-        "HAS_RAIL_FINAL":"true" if final_modes.get("rail", False) else "false",
-    }
 
 
 def parse_result(output: str) -> str:

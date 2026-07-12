@@ -3,5 +3,6 @@
     "ALLOW_HIGH_FREQ":          true,
     "ALLOW_LOW_FARE":           true,
     "ALLOW_ROAD_CHARGE":        true,
-    "ALLOW_ACCESSIBLE_SERVICE": true
+    "ALLOW_ACCESSIBLE_SERVICE": true,
+    "PT_ONLY":                  false
 }
