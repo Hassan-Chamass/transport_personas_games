@@ -34,6 +34,13 @@
 // "generalized_cost" reward (equivalent pence) combines time, fare and walking
 //   with per-persona weights W_TIME / W_FARE / W_WALK -- the persona's true
 //   objective for best-response (Stackelberg) analyses.
+//
+// "revenue" / "policy_cost" rewards (pence per traveller-journey) give the
+//   manager a real objective: PT fares + road-charge income vs low-fare
+//   subsidies and amortized fixed policy costs (charged once at phase=0,
+//   accruing regardless of persona behaviour). Concessionary journeys yield
+//   no revenue (no reimbursement modelled). Net = revenue - policy_cost,
+//   computed in post-processing (PRISM rewards must stay non-negative).
 // ============================================================
 
 smg
@@ -139,6 +146,10 @@ const int TAXI_STOP_FARE_BASE;
 const int TAXI_FINAL_FARE_BASE;
 const int CAR_COST;
 const int ROAD_CHARGE_SURCHARGE;
+
+// Policy costs (pence, amortized per traveller; supplied via fares JSON)
+const int COST_HIGH_FREQ;
+const int COST_ACCESSIBLE;
 
 // Mode availability flags (supplied via preprocessing.py)
 const bool HAS_BUS_STOP;
@@ -556,4 +567,36 @@ rewards "generalized_cost"
     [ride_final_rail]     true      : W_TIME*TIME_FINAL_RAIL         + W_FARE*rail_fare;
     [final_leg_walk]      true      : W_TIME*TIME_FINAL_WALK         + W_WALK*DIST_INTERCHANGE_TO_DEST;
     [wait_at_stop]        true      : W_TIME*avg_wait_time;
+endrewards
+
+// -------------------------------------------------------
+// Rewards: operator/authority revenue (pence per traveller-journey)
+// PT fares actually paid (0 for bus-pass holders) plus road-charge
+// income under policy=3. Taxi base fares go to the private operator
+// and are excluded; only the surcharge counts as authority revenue.
+// -------------------------------------------------------
+rewards "revenue"
+    [ride_bus]        true     : bus_fare;
+    [ride_rail]       true     : rail_fare;
+    [ride_final_bus]  true     : bus_fare;
+    [ride_final_rail] true     : rail_fare;
+    [choose_car]      policy=3 : ROAD_CHARGE_SURCHARGE;
+    [taxi_direct]     policy=3 : ROAD_CHARGE_SURCHARGE;
+    [taxi_from_stop]  policy=3 : ROAD_CHARGE_SURCHARGE;
+    [final_leg_taxi]  policy=3 : ROAD_CHARGE_SURCHARGE;
+endrewards
+
+// -------------------------------------------------------
+// Rewards: policy cost to the authority (pence per traveller-journey)
+// Fixed costs (high_freq, accessible_service) are amortized per traveller
+// and charged at phase=0 whether or not the persona then uses PT.
+// low_fare costs the per-ride subsidy, only when a fare is actually paid.
+// -------------------------------------------------------
+rewards "policy_cost"
+    [set_high_freq]          true : COST_HIGH_FREQ;
+    [set_accessible_service] true : COST_ACCESSIBLE;
+    [ride_bus]        policy=2 & !HAS_BUS_PASS : BUS_FARE_BASE-BUS_FARE_LOW;
+    [ride_final_bus]  policy=2 & !HAS_BUS_PASS : BUS_FARE_BASE-BUS_FARE_LOW;
+    [ride_rail]       policy=2 : RAIL_FARE_BASE-RAIL_FARE_LOW;
+    [ride_final_rail] policy=2 : RAIL_FARE_BASE-RAIL_FARE_LOW;
 endrewards

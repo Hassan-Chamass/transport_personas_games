@@ -29,6 +29,16 @@
             "_policy_id": 3,
             "_note": "Congestion surcharge added to car and taxi journeys",
             "surcharge": 500
+        },
+        "high_freq": {
+            "_policy_id": 1,
+            "_note": "Amortized extra service cost per traveller (placeholder, to be swept)",
+            "cost_per_traveller": 150
+        },
+        "accessible_service": {
+            "_policy_id": 4,
+            "_note": "Amortized accessibility provision cost per traveller (placeholder, to be swept)",
+            "cost_per_traveller": 100
         }
     }
 }

@@ -1228,10 +1228,12 @@ async function loadFares() {
 }
 
 function renderFaresEditor(data) {
-  const b  = data.base_fares                          || {};
-  const tx = data.taxi                                || {};
-  const lf = data.policy_overrides?.low_fare          || {};
-  const rc = data.policy_overrides?.road_charge       || {};
+  const b  = data.base_fares                             || {};
+  const tx = data.taxi                                   || {};
+  const lf = data.policy_overrides?.low_fare             || {};
+  const rc = data.policy_overrides?.road_charge          || {};
+  const hf = data.policy_overrides?.high_freq            || {};
+  const ac = data.policy_overrides?.accessible_service   || {};
   document.getElementById('fares-editor').innerHTML = `
     <h3>Base fares</h3>
     <div class="grid-2">
@@ -1251,7 +1253,12 @@ function renderFaresEditor(data) {
     </div>
     <h3>Policy: Road charge surcharge (policy = 3)</h3>
     <div class="grid-2">
-      ${numInput('fare_rc_surge', 'Surcharge on all taxis (pence)', rc.surcharge || 0, 1, 'Extra cost in pence added to all taxi journeys when the road charge policy is active')}
+      ${numInput('fare_rc_surge', 'Surcharge on car & taxi (pence)', rc.surcharge || 0, 1, 'Extra cost in pence added to car and taxi journeys when the road charge policy is active; collected as authority revenue')}
+    </div>
+    <h3>Policy costs (pence per traveller)</h3>
+    <div class="grid-2">
+      ${numInput('fare_hf_cost',  'High frequency (policy = 1)',    hf.cost_per_traveller || 0, 1, 'Amortized cost per traveller of running increased service frequency; charged to the authority whenever the policy is active')}
+      ${numInput('fare_acc_cost', 'Accessible service (policy = 4)', ac.cost_per_traveller || 0, 1, 'Amortized cost per traveller of guaranteeing accessible service; charged to the authority whenever the policy is active')}
     </div>`;
 }
 
@@ -1269,8 +1276,10 @@ function snapshotFares() {
       rail: getVal('fare_rail') ?? 0,
     },
     policy_overrides: {
-      low_fare:    { bus: getVal('fare_lf_bus') ?? 0, rail: getVal('fare_lf_rail') ?? 0 },
-      road_charge: { surcharge: getVal('fare_rc_surge') ?? 0 },
+      low_fare:           { bus: getVal('fare_lf_bus') ?? 0, rail: getVal('fare_lf_rail') ?? 0 },
+      road_charge:        { surcharge: getVal('fare_rc_surge') ?? 0 },
+      high_freq:          { cost_per_traveller: getVal('fare_hf_cost') ?? 0 },
+      accessible_service: { cost_per_traveller: getVal('fare_acc_cost') ?? 0 },
     }
   };
 }

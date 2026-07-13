@@ -284,3 +284,33 @@
 
 // 56. Best active journey (last leg walk or bike)
 <<manager,persona>> R{"generalized_cost"}min=? [ F (loc=3 & (mode=2 | mode=6)) ]
+
+
+// ============================
+// SECTION I — MANAGER OBJECTIVE: REVENUE & POLICY COST
+// revenue: PT fares paid + road-charge income (pence per traveller-journey).
+// policy_cost: low-fare subsidies + amortized fixed costs of high_freq /
+// accessible_service. Net = revenue - policy_cost in post-processing.
+// Revenue thresholds calibrated for Giffnock (bus 245p, rail 430p).
+// ============================
+
+// 57. Revenue ceiling: best revenue with a cooperative traveller
+<<manager,persona>> R{"revenue"}max=? [ F done ]
+
+// 58. Revenue floor: guaranteed revenue against a fare-avoiding traveller
+<<manager>> R{"revenue"}max=? [ F done ]
+
+// 59. Minimum policy spend
+<<manager,persona>> R{"policy_cost"}min=? [ F done ]
+
+// 60. Decarbonise without a deficit: CO2e<=500g AND revenue>=one bus fare
+<<manager,persona>> ( R{"co2e"}<=500 [C] & R{"revenue"}>=245 [C] )
+
+// 61. Mid-carbon, rail-grade revenue: CO2e<=1000g AND revenue>=430p
+<<manager,persona>> ( R{"co2e"}<=1000 [C] & R{"revenue"}>=430 [C] )
+
+// 62. Affordable AND viable: generalized cost<=2000 AND revenue>=245p
+<<manager,persona>> ( R{"generalized_cost"}<=2000 [C] & R{"revenue"}>=245 [C] )
+
+// 63. The full balance: user cost<=2000 AND CO2e<=500g AND revenue>=245p
+<<manager,persona>> ( R{"generalized_cost"}<=2000 [C] & R{"co2e"}<=500 [C] & R{"revenue"}>=245 [C] )

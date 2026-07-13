@@ -55,6 +55,9 @@ def get_trip_constants_from_data(trip_data: dict, fares_data: dict,
     car_cost_per_km = fares_data.get("car", {}).get("cost_per_km", 0)
     taxi_init  = fares_data["taxi"]["initial_charge"]
     taxi_pkm   = fares_data["taxi"]["price_per_km"]
+    po       = fares_data["policy_overrides"]
+    cost_hf  = po.get("high_freq", {}).get("cost_per_traveller", 0)
+    cost_acc = po.get("accessible_service", {}).get("cost_per_traveller", 0)
 
     consts: dict[str, int | float] = {
         # --- distance constants (metres) ---
@@ -104,6 +107,8 @@ def get_trip_constants_from_data(trip_data: dict, fares_data: dict,
         "TAXI_FINAL_FARE_BASE":       round(taxi_init + seg["taxi_final_leg"]["dist_km"] * taxi_pkm),
         "CAR_COST":                   round(seg["car_direct"]["dist_km"] * car_cost_per_km),
         "ROAD_CHARGE_SURCHARGE":      surge,
+        "COST_HIGH_FREQ":             cost_hf,
+        "COST_ACCESSIBLE":            cost_acc,
 
         # --- mode availability flags ---
         "HAS_BUS_STOP":  "true" if stop_modes.get("bus",   True)  else "false",
