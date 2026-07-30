@@ -1,46 +1,11 @@
 // ============================================================
-// transport_smg.pm
-// UK DfT Transport Personas -- Turn-Based Stochastic Multi-Player Game
+// transport_smg.pm -- UK DfT Transport Personas, Turn-Based SMG (PRISM-games 3.2.4)
 //
-// Formalism  : Turn-Based SMG (smg) for PRISM-games 3.2.4
-// Players    : manager (sets transport policy once), persona (navigates journey)
-// Environment: probabilistic, embedded in player action outcomes -- no env player
-//
-// Corridor   : home(0) -> stop/station(1) -> interchange(2) -> destination(3)
-//   Distances and times supplied via preprocessing constants (see params/scenarios/)
-//
-// Modes      : 0=none  1=car  2=walk  3=bus  4=taxi  5=rail  6=bike
-// Policies   : 0=normal  1=high_freq  2=low_fare  3=road_charge  4=accessible_service
-//
-// Phase structure (global phase variable):
-//   phase=0  manager acts once: picks policy + observable conditions sampled
-//   phase=1  persona acts per leg until done=true
-//
-// Key design choices:
-//   - Manager acts exactly once at phase=0 (6-branch sampling of weather x acc_bus)
-//   - set_accessible_service guarantees acc_bus=true and halves LIFT_BREAK_PROB (3 branches: weather only)
-//   - Lift failure is an in-journey disruption embedded in attempt_rail/attempt_final_rail probabilities
-//   - In-journey disruptions are probabilistic outcomes within persona's boarding actions
-//   - disruptions_used tracks budget; once exhausted, all service runs without disruption
-//   - done=true is absorbing (success at loc=3 or abandon via give_up)
-//   - give_up carries no time penalty: R{"time"} measures actual travel time only.
-//     Divide by P(F loc=3) in post-processing to get E[time | success].
-//     Abandonment is quantified separately via P [F (done & abandon)].
-//
-// Boarding is split into attempt_* / ride_* actions: attempt resolves the service
-//   outcome, ride (forced when pending>0) performs the leg and carries the rewards,
-//   so time/co2e/fare are only charged on legs actually travelled.
-//
-// "generalized_cost" reward (equivalent pence) combines time, fare and walking
-//   with per-persona weights W_TIME / W_FARE / W_WALK -- the persona's true
-//   objective for best-response (Stackelberg) analyses.
-//
-// "revenue" / "policy_cost" rewards (pence per traveller-journey) give the
-//   manager a real objective: PT fares + road-charge income vs low-fare
-//   subsidies and amortized fixed policy costs (charged once at phase=0,
-//   accruing regardless of persona behaviour). Concessionary journeys yield
-//   no revenue (no reimbursement modelled). Net = revenue - policy_cost,
-//   computed in post-processing (PRISM rewards must stay non-negative).
+// Players : manager (phase=0, sets policy once) | persona (phase=1, navigates journey) 
+// (Environment: probabilistic, embedded in player action outcomes -- no env playery
+// Corridor: home(0) -> stop(1) -> interchange(2) -> destination(3)
+// Modes   : 0=none 1=car 2=walk 3=bus 4=taxi 5=rail 6=bike
+// Policies: 0=normal 1=high_freq 2=low_fare 3=road_charge 4=accessible_service
 // ============================================================
 
 smg
@@ -61,9 +26,7 @@ endplayer
 
 global phase : [0..1] init 0;
 
-// -------------------------------------------------------
 // Constants -- Persona (supplied via params/personas/*.json)
-// -------------------------------------------------------
 const bool CAR_AVAILABLE;
 const bool NEEDS_STEP_FREE;
 const bool HAS_BUS_PASS;
@@ -77,9 +40,7 @@ const double W_TIME;   // pence per minute (value of time)
 const double W_FARE;   // multiplier on pence actually paid
 const double W_WALK;   // pence per metre walked
 
-// -------------------------------------------------------
 // Constants -- Scenario (supplied via params/scenarios/*.json)
-// -------------------------------------------------------
 const int    DISRUPTION_BUDGET;
 const double MINOR_DELAY_PROB;
 const double MODERATE_DELAY_PROB;
@@ -90,12 +51,10 @@ const double NO_ACCESSIBLE_BUS_PROB;
 const double RAIN_PROB;
 const double SEVERE_WEATHER_PROB;
 
-// -------------------------------------------------------
 // Constants -- Run config (supplied via params/run_config.json)
 // Set a policy flag to false to disable that policy for the manager.
 // At least one ALLOW_* must be true or the model deadlocks at phase=0.
 // PT_ONLY=true disables car and taxi for all personas (PT-only experiment).
-// -------------------------------------------------------
 const bool ALLOW_NORMAL;
 const bool ALLOW_HIGH_FREQ;
 const bool ALLOW_LOW_FARE;
@@ -103,9 +62,7 @@ const bool ALLOW_ROAD_CHARGE;
 const bool ALLOW_ACCESSIBLE_SERVICE;
 const bool PT_ONLY;
 
-// -------------------------------------------------------
 // Constants -- Trip geometry (supplied via preprocessing.py)
-// -------------------------------------------------------
 
 // Distance constants (metres)
 const int DIST_HOME_TO_STOP;
@@ -157,9 +114,7 @@ const bool HAS_RAIL_STOP;
 const bool HAS_BUS_FINAL;
 const bool HAS_RAIL_FINAL;
 
-// -------------------------------------------------------
 // Formulas
-// -------------------------------------------------------
 
 formula road_congestion = weather=2 ? 2 : (weather=1 ? 1 : 0);
 
@@ -218,13 +173,9 @@ formula p_ab = 1.0 - NO_ACCESSIBLE_BUS_PROB;
 formula p_nb = NO_ACCESSIBLE_BUS_PROB;
 
 
-// -------------------------------------------------------
 // Module m_manager
-// Owns: policy, weather, acc_bus
-// Reads: phase (global)
+// Owns: policy, weather, acc_bus | Reads: phase (global)
 // Acts at phase=0; sets phase=1 on every transition
-// lift_ok removed: lift failure is now an in-journey disruption (see eff_lift_fail)
-// -------------------------------------------------------
 module m_manager
 
     policy  : [0..4] init 0;
@@ -277,17 +228,11 @@ module m_manager
 endmodule
 
 
-// -------------------------------------------------------
 // Module m_persona
 // Owns: loc, mode, done, abandon, service_status, disruptions_used, fare_spent, pending
-// Reads: phase (global), policy/weather/acc_bus (from m_manager state)
-// Acts at phase=1; loops until done=true
-//
-// service_status: 0=normal  1=delayed (resolved by wait_at_stop)  2=cancelled
-// disruptions_used: counts disruptions consumed against DISRUPTION_BUDGET
-// fare_spent: tracks cumulative fare actually paid (updated on successful boarding only)
-// pending: service arrived, ride pending (1=bus, 2=rail)
-// -------------------------------------------------------
+// Reads: phase (global), policy/weather/acc_bus (from m_manager state). Acts at phase=1; loops until done=true.
+// service_status: 0=normal 1=delayed(wait_at_stop) 2=cancelled | disruptions_used: vs DISRUPTION_BUDGET
+// fare_spent: cumulative fare actually paid | pending: service arrived, ride pending (1=bus, 2=rail)
 module m_persona
 
     loc              : [0..3]              init 0;
@@ -299,24 +244,18 @@ module m_persona
     fare_spent       : [0..6000]           init 0;
     pending          : [0..2]              init 0;
 
-    // -------------------------------------------------------
-    // Terminal: journey complete (loc=3) or abandoned (give_up)
-    // Self-loop keeps the state absorbing for PRISM F-type properties
-    // -------------------------------------------------------
+    // Terminal: journey complete (loc=3) or abandoned (give_up).
+    // Self-loop keeps the state absorbing for PRISM F-type properties.
     [done_loop] phase=1 & done -> true;
 
-    // -------------------------------------------------------
     // Give up: only available when no other action is enabled at the current location
-    // (stuck_home / stuck_stop / stuck_interchange formulas encode this condition)
-    // -------------------------------------------------------
+    // (stuck_home / stuck_stop / stuck_interchange formulas encode this condition).
     [give_up] phase=1 & !done & pending=0
               & ((loc=0 & stuck_home) | (loc=1 & stuck_stop) | (loc=2 & stuck_interchange))
               -> (done'=true) & (abandon'=true);
 
 
-    // -------------------------------------------------------
     // At home (loc=0)
-    // -------------------------------------------------------
 
     // Car (direct)
     [choose_car] phase=1 & loc=0 & !done & CAR_AVAILABLE & !PT_ONLY
@@ -339,15 +278,10 @@ module m_persona
         -> (loc'=1) & (mode'=2);
 
 
-    // -------------------------------------------------------
-    // At stop (loc=1)
-    // attempt_* resolves the service outcome; ride_* (only action when pending>0)
-    //   performs the leg and carries the rewards.
-    // Two attempt variants per service handle the disruption budget:
-    //   Variant A (disruptions_used < DISRUPTION_BUDGET): probabilistic outcome
-    //   Variant B (disruptions_used >= DISRUPTION_BUDGET): service always runs
-    // Guards on the two variants are mutually exclusive -- no nondeterminism between them
-    // -------------------------------------------------------
+    // At stop (loc=1). attempt_* resolves the service outcome; ride_* (only action when
+    // pending>0) performs the leg and carries the rewards. Two attempt variants handle the
+    // disruption budget (A: probabilistic, while budget remains | B: guaranteed once exhausted);
+    // their guards are mutually exclusive -- no nondeterminism between them.
 
     // Attempt bus -- variant A (disruption budget remaining)
     [attempt_bus] phase=1 & loc=1 & !done & pending=0 & service_status=0
@@ -399,9 +333,7 @@ module m_persona
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_stop_fare) & (done'=true);
 
 
-    // -------------------------------------------------------
     // At interchange (loc=2)
-    // -------------------------------------------------------
 
     // Attempt final leg bus -- variant A
     [attempt_final_bus] phase=1 & loc=2 & !done & pending=0 & service_status=0
@@ -458,10 +390,7 @@ module m_persona
 endmodule
 
 
-// -------------------------------------------------------
-// Rewards: travel time (minutes)
-// All values are parametric constants supplied via params/scenarios/*.json
-// -------------------------------------------------------
+// Rewards: travel time (minutes). All values are parametric constants (params/scenarios/*.json).
 rewards "time"
     [choose_car]          weather=0 :  TIME_CAR_CLEAR;
     [choose_car]          weather=1 :  TIME_CAR_RAIN;
@@ -486,12 +415,7 @@ rewards "time"
     [wait_at_stop]        true      :  avg_wait_time;
 endrewards
 
-// -------------------------------------------------------
-// Rewards: carbon emissions (grams CO2e)
-// Based on UK DfT 2025 per-pkm factors (scope 3 inclusive):
-//   taxi 148.6 g/pkm | bus 125.25 g/pkm | rail 35.46 g/pkm | car ~168 g/vkm | active 0 g/pkm
-// Per-leg CO2e constants computed from distances x factors in preprocessing.py
-// -------------------------------------------------------
+// Rewards: carbon emissions (grams CO2e). Per-leg constants computed in preprocessing.py (UK DfT 2025 factors).
 rewards "co2e"
     [choose_car]          true :  CO2E_CAR_DIRECT;
     [taxi_direct]         true :  CO2E_TAXI_DIRECT;
@@ -507,15 +431,7 @@ rewards "co2e"
     [final_leg_walk]      true :     0;
 endrewards
 
-// -------------------------------------------------------
-// Rewards: fare cost (pence)
-//
-// Policy effects:
-//   policy=2 (low_fare):   bus_fare=100p, rail_fare=200p
-//   policy=3 (road_charge): car and taxi +500p
-//   HAS_BUS_PASS:           bus_fare=0p regardless of policy
-//
-// -------------------------------------------------------
+// Rewards: fare cost (pence). Policy effects encoded in the fare/cost formulas above.
 rewards "fare"
     [choose_car]      true : car_cost;
     [ride_bus]        true : bus_fare;
@@ -527,9 +443,7 @@ rewards "fare"
     [final_leg_taxi]  true : taxi_final_fare;
 endrewards
 
-// -------------------------------------------------------
 // Rewards: walking distance (metres)
-// -------------------------------------------------------
 rewards "walking_distance"
     [walk_to_stop]        true :  DIST_HOME_TO_STOP;
     [final_leg_walk]      true :  DIST_INTERCHANGE_TO_DEST;
@@ -538,13 +452,9 @@ endrewards
 
 
 
-// -------------------------------------------------------
-// Rewards: generalized cost (equivalent pence)
-// Per-persona trade-off between time, money and walking:
-//   W_TIME (pence/min, value of time) | W_FARE (multiplier on pence paid)
-//   W_WALK (pence/metre walked)
+// Rewards: generalized cost (equivalent pence). Per-persona trade-off between time, money and
+// walking: W_TIME (pence/min) | W_FARE (multiplier on pence paid) | W_WALK (pence/metre).
 // give_up charges nothing, consistent with the "time" reward.
-// -------------------------------------------------------
 rewards "generalized_cost"
     [choose_car]          weather=0 : W_TIME*TIME_CAR_CLEAR          + W_FARE*car_cost;
     [choose_car]          weather=1 : W_TIME*TIME_CAR_RAIN           + W_FARE*car_cost;
@@ -569,12 +479,9 @@ rewards "generalized_cost"
     [wait_at_stop]        true      : W_TIME*avg_wait_time;
 endrewards
 
-// -------------------------------------------------------
-// Rewards: operator/authority revenue (pence per traveller-journey)
-// PT fares actually paid (0 for bus-pass holders) plus road-charge
-// income under policy=3. Taxi base fares go to the private operator
-// and are excluded; only the surcharge counts as authority revenue.
-// -------------------------------------------------------
+// Rewards: operator/authority revenue (pence per traveller-journey). PT fares actually paid
+// (0 for bus-pass holders) plus road-charge income under policy=3. Taxi base fares go to the
+// private operator and are excluded; only the surcharge counts as authority revenue.
 rewards "revenue"
     [ride_bus]        true     : bus_fare;
     [ride_rail]       true     : rail_fare;
@@ -586,12 +493,9 @@ rewards "revenue"
     [final_leg_taxi]  policy=3 : ROAD_CHARGE_SURCHARGE;
 endrewards
 
-// -------------------------------------------------------
-// Rewards: policy cost to the authority (pence per traveller-journey)
-// Fixed costs (high_freq, accessible_service) are amortized per traveller
-// and charged at phase=0 whether or not the persona then uses PT.
+// Rewards: policy cost to the authority (pence per traveller-journey). Fixed costs (high_freq,
+// accessible_service) are amortized per traveller and charged at phase=0 regardless of PT use.
 // low_fare costs the per-ride subsidy, only when a fare is actually paid.
-// -------------------------------------------------------
 rewards "policy_cost"
     [set_high_freq]          true : COST_HIGH_FREQ;
     [set_accessible_service] true : COST_ACCESSIBLE;

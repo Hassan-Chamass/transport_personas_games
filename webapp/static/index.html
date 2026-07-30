@@ -493,9 +493,7 @@ input:checked + .slider::before { transform: translateX(18px); }
 </div><!-- /app-layout -->
 
 <script>
-// ═══════════════════════════════════════════════════════════════════════════
-// State
-// ═══════════════════════════════════════════════════════════════════════════
+// ── State ──
 const POLICY_LOOP_CONFIGS = [
   { key: 'ALLOW_NORMAL',             label: 'Normal (no intervention)' },
   { key: 'ALLOW_HIGH_FREQ',          label: 'High frequency service' },
@@ -511,6 +509,8 @@ const state = {
   factorsData:       null,
   policyData:        null,
   policyLoop:        false,
+  sweep:             null,
+  sweepSeries:       [],
   selectedPersonas:  [],
   selectedScenarios: [],
   allProps:          [],
@@ -519,9 +519,7 @@ const state = {
 
 const _initialized = {};
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Navigation
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Navigation ──
 function goToStep(n) {
   if (n > state.currentStep) {
     if (state.currentStep === 2 && state.selectedPersonas.length === 0) {
@@ -558,9 +556,7 @@ function goToStep(n) {
   if (inits[n]) inits[n]();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Utilities
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Utilities ──
 async function api(path, opts) {
   const r = await fetch(path, opts);
   return r.json();
@@ -571,10 +567,236 @@ function tip(text) {
 }
 
 function numInput(id, label, value, step = 'any', tooltip = '') {
+  const sc = sweepConstFor(id);
+  const active = sc && state.sweep && state.sweep.constName === sc;
+  const sweepBtn = sc
+    ? `<button type="button" class="sweep-btn${active ? ' active' : ''}" title="Sweep this constant over a range"
+         onclick="toggleSweep(this, '${sc}', '${id}')">⇄</button>`
+    : '';
   return `<div class="field-row">
     <label>${label}${tooltip ? tip(tooltip) : ''}</label>
-    <input type="number" id="${id}" value="${value}" step="${step}">
+    <div style="display:flex;gap:4px;align-items:center">
+      <input type="number" id="${id}" value="${value}" step="${step}">${sweepBtn}
+    </div>
   </div>`;
+}
+
+// ── Sweeps (PRISM experiments over one constant) ─────────────────────────────
+// Only direct PRISM constants are sweepable (derived values like taxi price/km
+// go through preprocessing and cannot use native PRISM ranges).
+
+const SCENARIO_SWEEPABLE = ['MINOR_DELAY_PROB','MODERATE_DELAY_PROB','SEVERE_DELAY_PROB',
+  'CANCEL_PROB','DISRUPTION_BUDGET','LIFT_BREAK_PROB','NO_ACCESSIBLE_BUS_PROB',
+  'RAIN_PROB','SEVERE_WEATHER_PROB'];
+const PERSONA_SWEEPABLE  = ['WALK_TOLERANCE','BIKE_TOLERANCE','FARE_MAX','W_TIME','W_FARE','W_WALK'];
+const FARE_SWEEP_MAP = {
+  fare_bus:      'BUS_FARE_BASE',
+  fare_rail:     'RAIL_FARE_BASE',
+  fare_lf_bus:   'BUS_FARE_LOW',
+  fare_lf_rail:  'RAIL_FARE_LOW',
+  fare_rc_surge: 'ROAD_CHARGE_SURCHARGE',
+  fare_hf_cost:  'COST_HIGH_FREQ',
+  fare_acc_cost: 'COST_ACCESSIBLE',
+};
+
+function sweepConstFor(id) {
+  if (FARE_SWEEP_MAP[id]) return FARE_SWEEP_MAP[id];
+  if (id.startsWith('scustom_')) { const k = id.slice(8); if (SCENARIO_SWEEPABLE.includes(k)) return k; }
+  if (id.startsWith('pcustom_')) { const k = id.slice(8); if (PERSONA_SWEEPABLE.includes(k))  return k; }
+  return null;
+}
+
+(function injectSweepCSS() {
+  const st = document.createElement('style');
+  st.textContent = `
+    .sweep-btn{border:1px solid #c7d2fe;background:#eef0ff;color:#4361ee;border-radius:5px;
+      cursor:pointer;padding:0 7px;font-size:13px;height:26px;flex-shrink:0}
+    .sweep-btn:hover{background:#dfe4ff}
+    .sweep-btn.active{background:#4361ee;color:white}
+    .sweep-range input{width:72px}
+    .chart-save-btn{border:1px solid #c7d2fe;background:#eef0ff;color:#4361ee;border-radius:5px;
+      cursor:pointer;padding:2px 8px;font-size:11px}
+    .chart-save-btn:hover{background:#dfe4ff}
+  `;
+  document.head.appendChild(st);
+})();
+
+function toggleSweep(btn, constName, fieldId) {
+  document.querySelectorAll('.sweep-range').forEach(el => el.remove());
+  document.querySelectorAll('.sweep-btn.active').forEach(b => b.classList.remove('active'));
+  if (state.sweep && state.sweep.constName === constName) {
+    state.sweep = null;
+    updateSweepBanner();
+    return;
+  }
+  const cur = getVal(fieldId) || 0;
+  let from = 0, to, step;
+  if (cur > 0 && cur <= 1) { to = 1; step = 0.1; }                    // probabilities / weights <= 1
+  else { to = cur > 0 ? cur * 2 : 100; step = Math.max(Math.round(to / 10), 1); }
+  state.sweep = { constName, from, to, step };
+  btn.classList.add('active');
+  btn.closest('.field-row').insertAdjacentHTML('beforeend', `
+    <div class="sweep-range" style="display:flex;gap:6px;align-items:center;font-size:.75rem;margin-top:4px;color:#4361ee">
+      from <input type="number" value="${from}" step="any" oninput="state.sweep.from=parseFloat(this.value);updateSweepBanner()">
+      to <input type="number" value="${to}" step="any" oninput="state.sweep.to=parseFloat(this.value);updateSweepBanner()">
+      step <input type="number" value="${step}" step="any" oninput="state.sweep.step=parseFloat(this.value);updateSweepBanner()">
+    </div>`);
+  updateSweepBanner();
+}
+
+function toggleSweepDetail(el) {
+  const tr  = el.closest('tr');
+  const det = tr && tr.nextElementSibling;
+  if (det && det.classList.contains('sweep-detail'))
+    det.style.display = det.style.display === 'none' ? '' : 'none';
+}
+
+function _chartTimestamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}`;
+}
+
+function svgToPngDataUrl(svgText, svgEl) {
+  return new Promise((resolve, reject) => {
+    const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+    const scale = 2;                                  // 2x for crisp report-quality PNG
+    const W = ((vb && vb.width)  || 640) * scale;
+    const H = ((vb && vb.height) || 300) * scale;
+    const img  = new Image();
+    const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = 'white'; ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(img, 0, 0, W, H);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG rasterization failed')); };
+    img.src = url;
+  });
+}
+
+async function saveChart(btn, fmt) {
+  const block = btn.closest('.sweep-chart-block');
+  const svgEl = block.querySelector('svg');
+  const msg   = block.querySelector('.chart-save-msg');
+  let svgText = new XMLSerializer().serializeToString(svgEl);
+  if (!svgText.includes('xmlns')) {
+    svgText = svgText.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+  }
+  const filename = `${block.dataset.chartname || 'sweep_chart'}_${_chartTimestamp()}`;
+  msg.textContent = '…';
+  try {
+    const data = fmt === 'svg' ? svgText : await svgToPngDataUrl(svgText, svgEl);
+    const base = (typeof origin !== 'undefined' && origin) ? origin : window.location.origin;
+    const r = await fetch(base + '/api/save-chart', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, format: fmt, data }),
+    });
+    const j = await r.json();
+    msg.textContent = j.saved ? 'saved ✓' : (j.error || 'error');
+  } catch (e) {
+    msg.textContent = 'error: ' + e.message;
+  }
+}
+
+function clearSweep() {
+  state.sweep = null;
+  document.querySelectorAll('.sweep-range').forEach(el => el.remove());
+  document.querySelectorAll('.sweep-btn.active').forEach(b => b.classList.remove('active'));
+  updateSweepBanner();
+}
+
+function updateSweepBanner() {
+  let el = document.getElementById('sweep-banner');
+  if (!state.sweep) { if (el) el.remove(); return; }
+  const { constName, from, to, step } = state.sweep;
+  const n = step > 0 && to > from ? Math.floor((to - from) / step + 1e-9) + 1 : '?';
+  const html = `⇄ Sweep: <strong>${constName}</strong> &nbsp;${from} → ${to}, step ${step} &nbsp;(${n} values)
+    <button onclick="clearSweep()" style="margin-left:8px;border:none;background:none;color:white;cursor:pointer;font-weight:bold">✕</button>`;
+  if (!el) {
+    document.body.insertAdjacentHTML('beforeend',
+      `<div id="sweep-banner" style="position:fixed;bottom:16px;right:16px;background:#4361ee;color:white;
+        padding:.6rem 1rem;border-radius:8px;font-size:.8rem;box-shadow:0 2px 10px rgba(0,0,0,.25);z-index:999">${html}</div>`);
+  } else {
+    el.innerHTML = html;
+  }
+}
+
+function renderSweepCharts(container) {
+  if (!state.sweepSeries.length) return;
+  const byProp = {};
+  state.sweepSeries.forEach(s => { (byProp[s.prop_n] = byProp[s.prop_n] || []).push(s); });
+  const palette = ['#4361ee','#e74c3c','#27ae60','#e67e22','#8e44ad','#16a085','#d35400','#2c3e50','#c0392b'];
+  const num = pt => {
+    if (pt.result === 'true')  return 1;
+    if (pt.result === 'false') return 0;
+    const v = parseFloat(pt.result);
+    return isNaN(v) ? null : v;
+  };
+  Object.entries(byProp).forEach(([propN, seriesList]) => {
+    const propMeta = state.allProps.find(x => x.index === parseInt(propN));
+    const W = 640, H = 300, padL = 62, padB = 40, padT = 28, padR = 12;
+    const pts = [];
+    seriesList.forEach(s => s.series.forEach(pt => {
+      const x = parseFloat(pt.value), y = num(pt);
+      if (!isNaN(x) && y !== null) pts.push([x, y]);
+    }));
+    if (!pts.length) return;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs);
+    const ymin = Math.min(0, ...ys), ymax = (Math.max(...ys) || 1) * 1.05;
+    const sx = v => padL + (v - xmin) / (xmax - xmin || 1) * (W - padL - padR);
+    const sy = v => H - padB - (v - ymin) / (ymax - ymin || 1) * (H - padT - padB);
+    let svg = '';
+    const entries = [];
+    seriesList.forEach((s, i) => {
+      const col = palette[i % palette.length];
+      const line = s.series
+        .map(pt => { const x = parseFloat(pt.value), y = num(pt);
+                     return (isNaN(x) || y === null) ? null : `${sx(x).toFixed(1)},${sy(y).toFixed(1)}`; })
+        .filter(Boolean).join(' ');
+      svg += `<polyline points="${line}" fill="none" stroke="${col}" stroke-width="2"/>`;
+      s.series.forEach(pt => { const x = parseFloat(pt.value), y = num(pt);
+        if (!isNaN(x) && y !== null) svg += `<circle cx="${sx(x).toFixed(1)}" cy="${sy(y).toFixed(1)}" r="3" fill="${col}"/>`; });
+      entries.push({ tag: [s.policy, s.persona, s.scenario].filter(Boolean).join(' · '), col });
+    });
+
+    // Legend drawn inside the SVG so it survives SVG/PNG export
+    const charW = 6.2, itemGap = 22, rowH = 16;
+    let lx = padL, ly = 0, legendSvg = '';
+    entries.forEach(e => {
+      const wItem = 12 + e.tag.length * charW + itemGap;
+      if (lx + wItem > W - padR && lx > padL) { lx = padL; ly += rowH; }
+      legendSvg += `<circle cx="${lx + 4}" cy="${H + 10 + ly}" r="4" fill="${e.col}"/>` +
+                   `<text x="${lx + 12}" y="${H + 14 + ly}" font-size="11" fill="#444">${e.tag}</text>`;
+      lx += wItem;
+    });
+    const totalH = H + 10 + ly + rowH;
+    const constName = seriesList[0].const_name;
+    const axes = `
+      <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="#999"/>
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="#999"/>
+      <text x="${(W + padL) / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#555">${constName}</text>
+      <text x="${padL - 8}" y="${sy(ymin) + 4}" text-anchor="end" font-size="10" fill="#777">${ymin.toFixed(0)}</text>
+      <text x="${padL - 8}" y="${sy(ymax) + 4}" text-anchor="end" font-size="10" fill="#777">${ymax.toFixed(0)}</text>
+      <text x="${sx(xmin)}" y="${H - padB + 14}" text-anchor="middle" font-size="10" fill="#777">${xmin}</text>
+      <text x="${sx(xmax)}" y="${H - padB + 14}" text-anchor="middle" font-size="10" fill="#777">${xmax}</text>`;
+    container.insertAdjacentHTML('afterbegin',
+      `<div class="run-block sweep-chart-block" data-chartname="sweep_${constName}_prop${propN}">
+        <div class="run-title">Sweep — ${constName} × prop ${propN}
+          <span class="badge">${propMeta ? propMeta.description : ''}</span>
+          <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <button class="chart-save-btn" onclick="saveChart(this,'svg')">⬇ SVG</button>
+            <button class="chart-save-btn" onclick="saveChart(this,'png')">⬇ PNG</button>
+            <span class="chart-save-msg" style="font-size:.7rem;color:#27ae60"></span>
+          </span></div>
+        <svg viewBox="0 0 ${W} ${totalH}" style="width:100%;max-width:${W}px">${axes}${svg}${legendSvg}</svg>
+      </div>`);
+  });
 }
 
 function toggleRow(id, label, checked, tooltip = '') {
@@ -623,9 +845,7 @@ function validateNumericFields(containerEl) {
   return valid;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Tabs
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Tabs ──
 function switchTab(context, tabName) {
   document.querySelectorAll(`.tab-btn[data-context="${context}"]`).forEach(btn =>
     btn.classList.toggle('active', btn.dataset.tab === tabName)
@@ -635,9 +855,7 @@ function switchTab(context, tabName) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Expandable cards — multi-select (personas / scenarios)
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Expandable cards — multi-select (personas / scenarios) ──
 function toggleExpand(context, name) {
   const body = document.getElementById(`detail-${context}-${name}`);
   const btn  = document.getElementById(`expand-btn-${context}-${name}`);
@@ -731,9 +949,7 @@ function flattenObject(obj, prefix) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 1 — Trip
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 1 — Trip ──
 async function initTripStep() {
   if (_initialized.trip) return;
   _initialized.trip = true;
@@ -885,9 +1101,7 @@ async function saveCustomTrip() {
   updateSummary();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 2 — Personas
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 2 — Personas ──
 async function initPersonaStep() {
   if (_initialized.persona) { renderPersonaPills(await api('/api/personas')); return; }
   _initialized.persona = true;
@@ -1004,9 +1218,7 @@ async function selectAllPersonas() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 3 — Scenarios
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 3 — Scenarios ──
 async function initScenarioStep() {
   if (_initialized.scenario) { renderScenarioPills(await api('/api/scenarios')); return; }
   _initialized.scenario = true;
@@ -1108,9 +1320,7 @@ async function addCustomScenario() {
   renderScenarioPills(names);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 4 — DfT Factors
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 4 — DfT Factors ──
 async function initFactorsStep() {
   if (_initialized.factors) return;
   _initialized.factors = true;
@@ -1203,9 +1413,7 @@ function snapshotFactors() {
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 5 — Fares
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 5 — Fares ──
 async function initFaresStep() {
   if (_initialized.fares) return;
   _initialized.fares = true;
@@ -1307,9 +1515,7 @@ async function saveCustomFares() {
   updateSummary();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STEP 6 — Properties
-// ═══════════════════════════════════════════════════════════════════════════
+// ── STEP 6 — Properties ──
 async function initPropsStep() {
   if (_initialized.props) { renderPropsSelectedCard(); return; }
   _initialized.props = true;
@@ -1318,16 +1524,20 @@ async function initPropsStep() {
   renderPropsSelectedCard();
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderPropsTable() {
   document.getElementById('props-tbody').innerHTML = state.allProps.map(p => {
     if (p.type === 'section') {
-      return `<tr class="section-row"><td colspan="4">${p.title}</td></tr>`;
+      return `<tr class="section-row"><td colspan="4">${escapeHtml(p.title)}</td></tr>`;
     }
     return `<tr onclick="togglePropRow(event,${p.index})">
       <td><input type="checkbox" class="prop-cb" value="${p.index}" checked onchange="renderPropsSelectedCard();updateSummary();updateExportDotBtn()"></td>
       <td>${p.index}</td>
-      <td>${p.description}</td>
-      <td style="font-family:monospace;font-size:0.72rem;color:#666">${p.formula}</td>
+      <td>${escapeHtml(p.description)}</td>
+      <td style="font-family:monospace;font-size:0.72rem;color:#666">${escapeHtml(p.formula)}</td>
     </tr>`;
   }).join('');
   renderPropsSelectedCard();
@@ -1391,9 +1601,7 @@ function getSelectedPropIndices() {
   return [...document.querySelectorAll('.prop-cb:checked')].map(cb => parseInt(cb.value));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RUN
-// ═══════════════════════════════════════════════════════════════════════════
+// ── RUN ──
 function _streamRun(policyConfig, props, policyKey) {
   return new Promise((resolve, reject) => {
     fetch('/api/run', {
@@ -1407,6 +1615,8 @@ function _streamRun(policyConfig, props, policyKey) {
         personas:  state.selectedPersonas,
         scenarios: state.selectedScenarios,
         props,
+        sweep:     state.sweep ? { const: state.sweep.constName, from: state.sweep.from,
+                                   to: state.sweep.to, step: state.sweep.step } : null,
       }),
     }).then(resp => {
       const reader = resp.body.getReader();
@@ -1439,6 +1649,14 @@ async function startRun() {
   const props = getSelectedPropIndices();
   if (props.length === 0) { alert('Select at least one property.'); return; }
 
+  if (state.sweep) {
+    const { from, to, step } = state.sweep;
+    if (!(step > 0) || !(to > from)) { alert('Invalid sweep range: need to > from and step > 0.'); return; }
+    const n = Math.floor((to - from) / step + 1e-9) + 1;
+    if (n > 50) { alert(`Sweep would compute ${n} values (max 50). Increase the step.`); return; }
+  }
+  state.sweepSeries = [];
+
   snapshotTrip();
   snapshotFactors();
   snapshotPolicy();
@@ -1459,7 +1677,8 @@ async function startRun() {
       const nP = state.selectedPersonas.length, nS = state.selectedScenarios.length;
       statusEl.innerHTML = `<span class="spinner"></span> Policy loop — ${POLICY_LOOP_CONFIGS.length} policies × ${nP} persona(s) × ${nS} scenario(s)…`;
       for (const { key, label } of POLICY_LOOP_CONFIGS) {
-        const policyConfig = Object.fromEntries(POLICY_LOOP_CONFIGS.map(p => [p.key, p.key === key]));
+        const policyConfig = { ...state.policyData,
+                               ...Object.fromEntries(POLICY_LOOP_CONFIGS.map(p => [p.key, p.key === key])) };
         blocksEl.insertAdjacentHTML('beforeend', `<div class="policy-section-header">Policy: ${label}</div>`);
         state.selectedPersonas.forEach(p => {
           state.selectedScenarios.forEach(s => {
@@ -1480,6 +1699,7 @@ async function startRun() {
       });
       await _streamRun(state.policyData, props, null);
     }
+    if (state.sweep) renderSweepCharts(blocksEl);
     openResultsInNewTab();
     resetToWizard();
   } catch(e) {
@@ -1526,15 +1746,45 @@ function handleSSE(ev, propIndices) {
   if (pb) pb.style.width = Math.round((done / propIndices.length) * 100) + '%';
 
   const propMeta = state.allProps.find(x => x.index === prop_n);
-  state.runResults.push({
+  const meta = {
     policy:      ev.policy   || '',
     persona:     persona     || '',
     scenario:    scenario    || '',
     prop_index:  prop_n,
     description: propMeta ? propMeta.description : '',
     formula:     propMeta ? propMeta.formula      : '',
-    result,
-  });
+  };
+
+  if (ev.series && ev.series.length) {
+    // Sweep run: one CSV row per swept value + series kept for the chart
+    ev.series.forEach(pt => state.runResults.push({
+      ...meta, result: pt.result,
+      const_name: ev.const_name, const_value: pt.value,
+    }));
+    state.sweepSeries.push({
+      policy: ev.policy || '', persona, scenario, prop_n,
+      const_name: ev.const_name, series: ev.series,
+    });
+    // Show every value inline (click the cell to fold/unfold)
+    if (resEl) {
+      resEl.textContent = `${ev.series.length} values ▾`;
+      resEl.setAttribute('onclick', 'toggleSweepDetail(this)');
+      resEl.style.cursor = 'pointer';
+      const chips = ev.series.map(pt => {
+        let c = '#27ae60';
+        if (pt.result === 'false')  c = '#e67e22';
+        else if (pt.result === 'ERROR' || pt.result === 'Infinity') c = '#c0392b';
+        return `<span style="font-size:.75rem;white-space:nowrap">` +
+               `<b style="color:#555">${pt.value}</b> → <b style="color:${c}">${pt.result}</b></span>`;
+      }).join('');
+      resEl.closest('tr').insertAdjacentHTML('afterend',
+        `<tr class="sweep-detail"><td></td><td colspan="2" style="padding:.3rem .6rem .6rem">
+           <div style="display:flex;flex-wrap:wrap;gap:.35rem 1.1rem">${chips}</div></td></tr>`);
+    }
+    return;
+  }
+
+  state.runResults.push({ ...meta, result, const_name: '', const_value: '' });
 }
 
 function openResultsInNewTab() {
@@ -1566,6 +1816,9 @@ function openResultsInNewTab() {
     .save-btn:hover{background:#3451d1}
     .save-btn:disabled{background:#aaa;cursor:default}
     #save-msg{font-size:.8rem;color:#555;margin-left:.8rem}
+    .chart-save-btn{border:1px solid #c7d2fe;background:#eef0ff;color:#4361ee;border-radius:5px;
+      cursor:pointer;padding:2px 8px;font-size:11px}
+    .chart-save-btn:hover{background:#dfe4ff}
   `;
 
   const html = `<!DOCTYPE html>
@@ -1588,6 +1841,60 @@ function openResultsInNewTab() {
   <scr` + `ipt>
     const runResults = ${resultsJSON};
     const origin = '${origin}';
+    function toggleSweepDetail(el) {
+      const tr  = el.closest('tr');
+      const det = tr && tr.nextElementSibling;
+      if (det && det.classList.contains('sweep-detail'))
+        det.style.display = det.style.display === 'none' ? '' : 'none';
+    }
+    function _chartTimestamp() {
+      const d = new Date(), p = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + '-' + p(d.getMinutes());
+    }
+    function svgToPngDataUrl(svgText, svgEl) {
+      return new Promise((resolve, reject) => {
+        const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+        const scale = 2;
+        const W = ((vb && vb.width)  || 640) * scale;
+        const H = ((vb && vb.height) || 300) * scale;
+        const img  = new Image();
+        const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+        const url  = URL.createObjectURL(blob);
+        img.onload = () => {
+          const cv = document.createElement('canvas');
+          cv.width = W; cv.height = H;
+          const ctx = cv.getContext('2d');
+          ctx.fillStyle = 'white'; ctx.fillRect(0, 0, W, H);
+          ctx.drawImage(img, 0, 0, W, H);
+          URL.revokeObjectURL(url);
+          resolve(cv.toDataURL('image/png'));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG rasterization failed')); };
+        img.src = url;
+      });
+    }
+    async function saveChart(btn, fmt) {
+      const block = btn.closest('.sweep-chart-block');
+      const svgEl = block.querySelector('svg');
+      const msg   = block.querySelector('.chart-save-msg');
+      let svgText = new XMLSerializer().serializeToString(svgEl);
+      if (!svgText.includes('xmlns')) {
+        svgText = svgText.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+      }
+      const filename = (block.dataset.chartname || 'sweep_chart') + '_' + _chartTimestamp();
+      msg.textContent = '…';
+      try {
+        const data = fmt === 'svg' ? svgText : await svgToPngDataUrl(svgText, svgEl);
+        const r = await fetch(origin + '/api/save-chart', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename, format: fmt, data }),
+        });
+        const j = await r.json();
+        msg.textContent = j.saved ? 'saved ✓' : (j.error || 'error');
+      } catch (e) {
+        msg.textContent = 'error: ' + e.message;
+      }
+    }
     async function saveCSV(btn) {
       btn.disabled = true; btn.textContent = 'Saving…';
       const msg = document.getElementById('save-msg');
@@ -1622,9 +1929,7 @@ function resetToWizard() {
   goToStep(1);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// DOT Export
-// ═══════════════════════════════════════════════════════════════════════════
+// ── DOT Export ──
 function updateExportDotBtn() {
   // Nothing to update proactively — feedback is shown on click
 }
@@ -1676,9 +1981,7 @@ async function exportDot() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Model overview toggle
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Model overview toggle ──
 function toggleModelOverview() {
   const panel  = document.getElementById('model-overview');
   const btn    = document.getElementById('overview-toggle');
@@ -1687,9 +1990,7 @@ function toggleModelOverview() {
   if (btn) btn.textContent = isOpen ? 'ℹ Model overview ▲' : 'ℹ Model overview ▼';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Run summary sidebar
-// ═══════════════════════════════════════════════════════════════════════════
+// ── Run summary sidebar ──
 function truncateNames(arr) {
   if (!arr || arr.length === 0) return null;
   return arr.map(x => x.name || String(x)).join('<br>');

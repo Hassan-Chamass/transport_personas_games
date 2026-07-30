@@ -20,6 +20,7 @@ POST /api/save-trip            Save a custom trip JSON to params/trip/
 POST /api/run                  SSE stream: run PRISM for all (persona x scenario x prop) combos
 """
 
+import base64
 import csv
 import json
 import re
@@ -268,12 +269,43 @@ def export_csv():
     ts       = datetime.now().strftime("%Y-%m-%d_%H-%M")
     filename = f"results_{ts}.csv"
     path     = EXPORTS_DIR / filename
-    fieldnames = ["policy", "persona", "scenario", "prop_index", "description", "formula", "result"]
+    fieldnames = ["policy", "persona", "scenario", "prop_index", "description", "formula", "result",
+                  "const_name", "const_value"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
     return jsonify({"filename": filename})
+
+
+# ── Save sweep charts (SVG / PNG) to results/exports/plots/ ─────────────────
+
+PLOTS_DIR = EXPORTS_DIR / "plots"
+
+@app.route("/api/save-chart", methods=["POST"])
+def save_chart():
+    """
+    Expects JSON body: { "filename": str, "format": "svg"|"png", "data": str }
+    data is raw SVG text for svg, or a data-URL (base64) for png.
+    Writes to results/exports/plots/<filename>.<format>.
+    """
+    body = request.get_json()
+    fmt  = body.get("format")
+    name = re.sub(r"[^A-Za-z0-9_\-.]", "_", body.get("filename", "chart"))
+    data = body.get("data", "")
+    if fmt not in ("svg", "png") or not data:
+        return jsonify({"error": "format must be svg or png, with data"}), 400
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = PLOTS_DIR / f"{name}.{fmt}"
+    if fmt == "svg":
+        path.write_text(data, encoding="utf-8")
+    else:
+        try:
+            b64 = data.split(",", 1)[1]
+            path.write_bytes(base64.b64decode(b64))
+        except (IndexError, ValueError):
+            return jsonify({"error": "invalid PNG data URL"}), 400
+    return jsonify({"saved": f"results/exports/plots/{name}.{fmt}"})
 
 
 # ── Export DOT ───────────────────────────────────────────────────────────────
@@ -358,9 +390,21 @@ def run():
     personas      = body.get("personas",  [])
     scenarios     = body.get("scenarios", [])
     prop_indices  = body.get("props",     [])
+    sweep_cfg     = body.get("sweep")    or None
 
     if not personas or not scenarios or not prop_indices:
         return jsonify({"error": "personas, scenarios, and props are required"}), 400
+
+    if sweep_cfg:
+        try:
+            sweep_cfg = {"const": str(sweep_cfg["const"]),
+                         "from":  float(sweep_cfg["from"]),
+                         "to":    float(sweep_cfg["to"]),
+                         "step":  float(sweep_cfg["step"])}
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": "sweep requires const, from, to, step"}), 400
+        if sweep_cfg["step"] <= 0 or sweep_cfg["to"] <= sweep_cfg["from"]:
+            return jsonify({"error": "sweep needs to > from and step > 0"}), 400
 
     def generate():
         try:
@@ -389,8 +433,9 @@ def run():
                             "persona": p_name, "scenario": s_name,
                             "total": len(prop_indices)})
 
-                for progress in run_combination(label, const_str, prop_indices):
-                    yield _sse({
+                for progress in run_combination(label, const_str, prop_indices,
+                                                sweep=sweep_cfg):
+                    ev = {
                         "type":    "progress",
                         "run":     label,
                         "persona": p_name,
@@ -398,7 +443,11 @@ def run():
                         "prop_n":  progress["prop_n"],
                         "result":  progress["result"],
                         "error":   progress["error"],
-                    })
+                    }
+                    if "series" in progress:
+                        ev["series"]     = progress["series"]
+                        ev["const_name"] = progress["const_name"]
+                    yield _sse(ev)
 
                 yield _sse({"type": "done", "run": label,
                             "persona": p_name, "scenario": s_name})

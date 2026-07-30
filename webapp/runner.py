@@ -106,6 +106,40 @@ def parse_result(output: str) -> str:
     return "ERROR"
 
 
+# ── Sweep (PRISM experiment) helpers ─────────────────────────────────────────
+
+def _fmt_range_value(v) -> str:
+    """Format a range bound: integral floats become ints (PRISM rejects
+    '0.0' for int constants; int literals are accepted for doubles)."""
+    f = float(v)
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def make_range_const(const_str: str, name: str, lo, step, hi) -> str:
+    """Replace 'NAME=value' with the PRISM experiment range 'NAME=lo:step:hi'."""
+    pattern = rf"(^|,){re.escape(name)}=[^,]*"
+    if not re.search(pattern, const_str):
+        raise ValueError(f"Swept constant {name} not found in the -const string")
+    lo, step, hi = _fmt_range_value(lo), _fmt_range_value(step), _fmt_range_value(hi)
+    return re.sub(pattern, rf"\g<1>{name}={lo}:{step}:{hi}", const_str, count=1)
+
+
+def parse_experiment_file(path) -> list[dict]:
+    """
+    Parse a PRISM -exportresults file: tab-separated, one header line
+    (constant name(s) + 'Result'), then one row per swept value.
+    Returns [{"value": "...", "result": "..."}, ...].
+    """
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        lines = [l.strip() for l in f if l.strip()]
+    for line in lines[1:]:                       # skip header
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            rows.append({"value": parts[0], "result": parts[-1]})
+    return rows
+
+
 def save_result(label: str, prop_n: int, output: str):
     """Write raw PRISM output to results/raw/{label}_prop{n}.txt"""
     path = RESULTS_DIR / f"{label}_prop{prop_n}.txt"
@@ -165,26 +199,44 @@ def run_combination(
     label: str,
     const_str: str,
     prop_indices: list[int],
+    sweep: dict = None,
 ):
     """
     Generator: runs PRISM for each property index in prop_indices.
     Yields dicts with progress info after each property completes.
 
+    sweep (optional): {"const": name, "from": x, "to": y, "step": z} —
+        each property is run as a single PRISM experiment over the range
+        (native ranged constant + -exportresults), and the yielded dict
+        carries the whole series instead of a single value.
+
     Yielded dict keys:
         prop_n   : int   — property number (1-based)
-        result   : str   — parsed result value or 'ERROR'
-        error    : bool  — True if PRISM returned non-zero exit code
+        result   : str   — parsed result value / summary, or 'ERROR'
+        error    : bool  — True if the run failed
+        series     (sweep only) : [{"value": v, "result": r}, ...]
+        const_name (sweep only) : swept constant name
     """
     for prop_n in prop_indices:
-        cmd = [
-            PRISM_EXE,
-            str(MODEL_FILE),
-            str(PROPS_FILE),
-            "-prop", str(prop_n),
-            "-const", const_str,
-        ]
-
+        series   = []
+        exp_file = None
         try:
+            cs = const_str
+            if sweep:
+                cs = make_range_const(const_str, sweep["const"],
+                                      sweep["from"], sweep["step"], sweep["to"])
+                exp_file = RESULTS_DIR / f"{label}_prop{prop_n}_sweep_{sweep['const']}.txt"
+
+            cmd = [
+                PRISM_EXE,
+                str(MODEL_FILE),
+                str(PROPS_FILE),
+                "-prop", str(prop_n),
+                "-const", cs,
+            ]
+            if exp_file is not None:
+                cmd += ["-exportresults", str(exp_file)]
+
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -192,8 +244,15 @@ def run_combination(
                 cwd=str(Path(PRISM_EXE).parent),
             )
             output = proc.stdout + proc.stderr
-            result = parse_result(output)
-            had_error = proc.returncode != 0 and result == "ERROR"
+
+            if sweep:
+                if exp_file.exists():
+                    series = parse_experiment_file(exp_file)
+                had_error = len(series) == 0
+                result = f"{len(series)} values" if not had_error else "ERROR"
+            else:
+                result = parse_result(output)
+                had_error = proc.returncode != 0 and result == "ERROR"
         except Exception as e:
             output = str(e)
             result = "ERROR"
@@ -201,8 +260,12 @@ def run_combination(
 
         save_result(label, prop_n, output)
 
-        yield {
+        out = {
             "prop_n":  prop_n,
             "result":  result,
             "error":   had_error,
         }
+        if sweep:
+            out["series"]     = series
+            out["const_name"] = sweep["const"]
+        yield out

@@ -26,6 +26,19 @@ Figures generated:
         fig4_time_adversarial_smg.png    prop 4  — adversarial journey time
         fig4_time_cooperative_smg.png    prop 11 — cooperative journey time
 
+    Per-policy mode, generalized-cost & manager-objective figures:
+        fig5_gencost_<scenario>.png       prop 48 — best-response generalized cost
+        fig5b_gencost_success_<scenario>.png  prop 48 / prop 9 — cost given success
+        fig6_mode_choice_<scenario>.png   argmin of props 53-56 — chosen mode matrix
+        fig7_revenue_net_<scenario>.png   prop 57 - prop 59 — net revenue ceiling
+        fig8_scorecard_<scenario>.png/csv policy scorecard (DfT-segment-weighted)
+        fig_time_success_<scenario>.png   prop 11 / prop 9 — E[time | success]
+        fig_fare_success_<scenario>.png   prop 12 / prop 9 — fare given success (equity view)
+
+    SMG mode extras:
+        fig5_gencost_smg.png              prop 48 heatmap (personas x scenarios)
+        fig_time_success_smg.png          prop 11 / prop 9
+
 Dependencies:
     pip install pandas matplotlib seaborn --break-system-packages
 """
@@ -38,6 +51,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
+from matplotlib.colors import ListedColormap
 from pathlib import Path
 
 # ── Display labels ─────────────────────────────────────────────────────────────
@@ -88,6 +102,26 @@ PERSONA_LABELS = {
     "empty_nester":        "Empty Nester",
     "heavy_car_user":      "Heavy Car User",
 }
+
+# DfT segment sizes (Meet the Personas pack, June 2023) — midpoints of the
+# published ranges (11-20% -> 15.5 | 6-10% -> 8 | "5% or less" -> 5).
+# Used as population weights for aggregated metrics; normalized at use.
+SEGMENT_WEIGHTS = {
+    "less_mobile":         15.5,   # Segment 1
+    "young_family":        15.5,   # Segment 2
+    "older_less_affluent":  8.0,   # Segment 3
+    "empty_nester":        15.5,   # Segment 4
+    "suburban_family":     15.5,   # Segment 5
+    "heavy_car_user":      15.5,   # Segment 6
+    "elderly_no_car":       5.0,   # Segment 7
+    "urban_professional":   8.0,   # Segment 8
+    "young_low_income":     5.0,   # Segment 9
+}
+WEIGHTS_DISPLAY = {PERSONA_LABELS.get(k, k): v for k, v in SEGMENT_WEIGHTS.items()}
+
+# Mode-conditioned generalized-cost props (argmin = the persona's chosen mode)
+MODE_PROPS = [(53, "Car"), (54, "PT"), (55, "Taxi"), (56, "Walk/Bike")]
+MODE_COLOR_LIST = ["#d9534f", "#5cb85c", "#f0ad4e", "#5bc0de"]   # Car, PT, Taxi, Walk/Bike
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 
@@ -274,6 +308,219 @@ def fig4_time(df, scenario, output_dir):
     save(fig, output_dir, f"fig4_time_adversarial_{scenario}.png")
 
 
+# ── Generalized-cost & manager-objective figures (per-policy mode) ────────────
+
+def _weighted_mean(series):
+    """Mean over personas weighted by DfT segment sizes (NaN-safe)."""
+    s = series.dropna()
+    if s.empty:
+        return float("nan")
+    w = pd.Series({k: WEIGHTS_DISPLAY.get(k, 1.0) for k in s.index})
+    return float((s * w).sum() / w.sum())
+
+
+def fig5_gencost(df, scenario, output_dir):
+    """Best-response generalized cost per policy (prop 48, equivalent pence)."""
+    data = pivot_prop(df, prop_id=48, scenario=scenario)
+    if data.empty:
+        print(f"  [SKIP fig5] No prop 48 data for {scenario}")
+        return
+    vmax = float(data.max(axis=None))
+    fig = heatmap(
+        data,
+        title=f"Generalized Cost of Best Response  [prop 48, equivalent pence]\n{scenario_title(scenario)}",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+    )
+    save(fig, output_dir, f"fig5_gencost_{scenario}.png")
+
+
+def fig5b_gencost_success(df, scenario, output_dir):
+    """Generalized cost conditioned on success: prop 48 / prop 9.
+    Removes the free-abandonment bias (abandoned journeys accrue almost no
+    cost and drag the raw expectation down). NaN when P(arrival) < 0.05."""
+    p48 = pivot_prop(df, prop_id=48, scenario=scenario)
+    p9  = pivot_prop(df, prop_id=9,  scenario=scenario)
+    if p48.empty or p9.empty:
+        print(f"  [SKIP fig5b] Need props 48 and 9 for {scenario}")
+        return
+    gc = (p48 / p9.reindex(index=p48.index, columns=p48.columns)).where(p9 > 0.05)
+    vmax = float(gc.max(axis=None))
+    if pd.isna(vmax):
+        print(f"  [SKIP fig5b] All values NaN for {scenario}")
+        return
+    fig = heatmap(
+        gc,
+        title=f"Generalized Cost Given Success  [prop 48 / prop 9, equivalent pence]\n{scenario_title(scenario)}",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+    )
+    save(fig, output_dir, f"fig5b_gencost_success_{scenario}.png")
+
+
+def fig6_mode_choice(df, scenario, output_dir):
+    """Chosen mode per (persona, policy): argmin of mode-conditioned props 53-56."""
+    pivots = {}
+    for prop_id, label in MODE_PROPS:
+        p = pivot_prop(df, prop_id=prop_id, scenario=scenario)
+        if not p.empty:
+            pivots[label] = p
+    if len(pivots) < 2:
+        print(f"  [SKIP fig6] Need props 53-56 data for {scenario}")
+        return
+
+    # Align all pivots on the same index/columns
+    idx  = list(pivots[next(iter(pivots))].index)
+    cols = list(pivots[next(iter(pivots))].columns)
+    for label in pivots:
+        pivots[label] = pivots[label].reindex(index=idx, columns=cols)
+
+    mode_labels = [label for _, label in MODE_PROPS if label in pivots]
+    codes  = pd.DataFrame(float("nan"), index=idx, columns=cols)
+    annots = pd.DataFrame("",           index=idx, columns=cols)
+    for r in idx:
+        for c in cols:
+            vals = {label: pivots[label].loc[r, c] for label in mode_labels}
+            vals = {k: v for k, v in vals.items() if pd.notna(v)}
+            if not vals:
+                annots.loc[r, c] = "stuck"
+                continue
+            best = min(vals, key=vals.get)
+            codes.loc[r, c]  = mode_labels.index(best)
+            annots.loc[r, c] = f"{best}\n{vals[best]:.0f}p"
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    sns.heatmap(
+        codes, ax=ax,
+        cmap=ListedColormap(MODE_COLOR_LIST[:len(mode_labels)]),
+        vmin=-0.5, vmax=len(mode_labels) - 0.5,
+        annot=annots, fmt="",
+        linewidths=0.5, linecolor="#dddddd",
+        cbar=False, annot_kws={"fontsize": 8},
+    )
+    ax.set_facecolor("#bbbbbb")   # NaN cells (infeasible everywhere) show grey
+    ax.set_title(
+        f"Chosen Mode of the Rational Persona  [argmin of props 53-56]\n{scenario_title(scenario)}",
+        fontsize=13, pad=14, fontweight="bold",
+    )
+    ax.set_xlabel("Policy", fontsize=11, labelpad=8)
+    ax.set_ylabel("Persona", fontsize=11, labelpad=8)
+    ax.tick_params(axis="x", rotation=30, labelsize=9)
+    ax.tick_params(axis="y", rotation=0,  labelsize=9)
+    fig.tight_layout()
+    save(fig, output_dir, f"fig6_mode_choice_{scenario}.png")
+
+
+def fig7_revenue_net(df, scenario, output_dir):
+    """Net revenue ceiling per policy: prop 57 (revenue max) - prop 59 (policy spend)."""
+    rev  = pivot_prop(df, prop_id=57, scenario=scenario)
+    cost = pivot_prop(df, prop_id=59, scenario=scenario)
+    if rev.empty:
+        print(f"  [SKIP fig7] No prop 57 data for {scenario}")
+        return
+    net = rev - cost.reindex(index=rev.index, columns=rev.columns).fillna(0) if not cost.empty else rev
+    vmin = min(0.0, float(net.min(axis=None)))
+    vmax = float(net.max(axis=None))
+    fig = heatmap(
+        net,
+        title=f"Net Revenue Ceiling  [prop 57 - prop 59, pence per traveller]\n{scenario_title(scenario)}",
+        cmap="RdYlGn", vmin=vmin, vmax=vmax, fmt=".0f",
+    )
+    save(fig, output_dir, f"fig7_revenue_net_{scenario}.png")
+
+
+def fig8_scorecard(df, scenario, output_dir):
+    """Policy scorecard: DfT-segment-weighted aggregates per policy (PNG + CSV)."""
+    p9  = pivot_prop(df, 9,  scenario)
+    p11 = pivot_prop(df, 11, scenario)
+    p48 = pivot_prop(df, 48, scenario)
+    p57 = pivot_prop(df, 57, scenario)
+    p59 = pivot_prop(df, 59, scenario)
+    if p48.empty:
+        print(f"  [SKIP fig8] No prop 48 data for {scenario}")
+        return
+
+    rows = []
+    for pol in p48.columns:
+        row = {"policy": pol,
+               "avg_gen_cost":   _weighted_mean(p48[pol]),
+               "worst_gen_cost": float(p48[pol].max())}
+        if not p9.empty:
+            row["avg_arrival"] = _weighted_mean(p9[pol])
+            if not p11.empty:
+                ts = (p11[pol] / p9[pol]).where(p9[pol] > 0.05)
+                row["avg_time_success"] = _weighted_mean(ts)
+        if not p57.empty:
+            net = p57[pol]
+            if not p59.empty:
+                net = net - p59[pol].reindex(p57.index).fillna(0)
+            row["net_revenue_ceiling"] = _weighted_mean(net)
+        rows.append(row)
+
+    sc = pd.DataFrame(rows).set_index("policy")
+    os.makedirs(output_dir, exist_ok=True)
+    csv_path = os.path.join(output_dir, f"scorecard_{scenario}.csv")
+    sc.to_csv(csv_path, float_format="%.2f")
+    print(f"  Saved: {csv_path}")
+
+    fig, ax = plt.subplots(figsize=(max(8, 2 + 1.8 * len(sc.columns)), 1.2 + 0.5 * len(sc)))
+    ax.axis("off")
+    table = ax.table(
+        cellText=[[f"{v:.1f}" if pd.notna(v) else "—" for v in r] for r in sc.values],
+        rowLabels=list(sc.index), colLabels=list(sc.columns),
+        loc="center", cellLoc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.4)
+    ax.set_title(
+        f"Policy Scorecard (DfT-segment-weighted)\n{scenario_title(scenario)}",
+        fontsize=13, fontweight="bold", pad=20,
+    )
+    fig.tight_layout()
+    save(fig, output_dir, f"fig8_scorecard_{scenario}.png")
+
+
+def fig_time_success(df, scenario, output_dir):
+    """E[time | success] = prop 11 / prop 9 (NaN when P(arrival) < 0.05)."""
+    p9  = pivot_prop(df, 9,  scenario)
+    p11 = pivot_prop(df, 11, scenario)
+    if p9.empty or p11.empty:
+        print(f"  [SKIP fig_time_success] Need props 9 and 11 for {scenario}")
+        return
+    ts = (p11 / p9).where(p9 > 0.05)
+    vmax = float(ts.max(axis=None))
+    if pd.isna(vmax):
+        print(f"  [SKIP fig_time_success] All values NaN for {scenario}")
+        return
+    fig = heatmap(
+        ts,
+        title=f"Expected Journey Time Given Success  [prop 11 / prop 9, minutes]\n{scenario_title(scenario)}",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+    )
+    save(fig, output_dir, f"fig_time_success_{scenario}.png")
+
+
+def fig_fare_success(df, scenario, output_dir):
+    """Fare given success: prop 12 / prop 9 (equity view — actual pence paid,
+    no gencost weight assumptions). Same success-conditioning as fig5b/fig_time_success
+    to dodge the free-abandonment bias (NaN when P(arrival) < 0.05)."""
+    p12 = pivot_prop(df, prop_id=12, scenario=scenario)
+    p9  = pivot_prop(df, prop_id=9,  scenario=scenario)
+    if p12.empty or p9.empty:
+        print(f"  [SKIP fig_fare_success] Need props 12 and 9 for {scenario}")
+        return
+    fare = (p12 / p9.reindex(index=p12.index, columns=p12.columns)).where(p9 > 0.05)
+    vmax = float(fare.max(axis=None))
+    if pd.isna(vmax):
+        print(f"  [SKIP fig_fare_success] All values NaN for {scenario}")
+        return
+    fig = heatmap(
+        fare,
+        title=f"Fare Given Success  [prop 12 / prop 9, pence]\n{scenario_title(scenario)}",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+    )
+    save(fig, output_dir, f"fig_fare_success_{scenario}.png")
+
+
 # ── SMG figures (all-policies mode) ───────────────────────────────────────────
 
 def fig1_arrival_smg(df, output_dir):
@@ -349,6 +596,43 @@ def fig3_abandon_smg(df, output_dir):
     save(fig, output_dir, "fig3_abandon_smg.png")
 
 
+def fig5_gencost_smg(df, output_dir):
+    """Best-response generalized cost (prop 48), personas x scenarios."""
+    data = pivot_prop_smg(df, prop_id=48)
+    if data.empty:
+        print("  [SKIP fig5_smg] No prop 48 data")
+        return
+    vmax = float(data.max(axis=None))
+    fig = heatmap(
+        data,
+        title="Generalized Cost of Best Response  [prop 48, equivalent pence, all policies]",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+        xlabel="Scenario", figsize=(6, 5),
+    )
+    save(fig, output_dir, "fig5_gencost_smg.png")
+
+
+def fig_time_success_smg(df, output_dir):
+    """E[time | success] = prop 11 / prop 9, personas x scenarios."""
+    p9  = pivot_prop_smg(df, prop_id=9)
+    p11 = pivot_prop_smg(df, prop_id=11)
+    if p9.empty or p11.empty:
+        print("  [SKIP fig_time_success_smg] Need props 9 and 11")
+        return
+    ts = (p11 / p9).where(p9 > 0.05)
+    vmax = float(ts.max(axis=None))
+    if pd.isna(vmax):
+        print("  [SKIP fig_time_success_smg] All values NaN")
+        return
+    fig = heatmap(
+        ts,
+        title="Expected Journey Time Given Success  [prop 11 / prop 9, minutes, all policies]",
+        cmap="RdYlGn_r", vmin=0, vmax=vmax, fmt=".0f",
+        xlabel="Scenario", figsize=(6, 5),
+    )
+    save(fig, output_dir, "fig_time_success_smg.png")
+
+
 def fig4_time_smg(df, output_dir):
     """Adversarial (prop 4) and cooperative (prop 11) journey time in minutes."""
     specs = [
@@ -377,9 +661,12 @@ def fig4_time_smg(df, output_dir):
 
 FIGURE_FUNCS_PER_POLICY = [
     fig1_arrival, fig2_gap, fig3_abandon, fig4_time,
+    fig5_gencost, fig5b_gencost_success, fig6_mode_choice, fig7_revenue_net,
+    fig8_scorecard, fig_time_success, fig_fare_success,
 ]
 FIGURE_FUNCS_SMG = [
     fig1_arrival_smg, fig2_gap_smg, fig3_abandon_smg, fig4_time_smg,
+    fig5_gencost_smg, fig_time_success_smg,
 ]
 
 
