@@ -19,7 +19,9 @@ player persona
     m_persona,
     [done_loop], [give_up],
     [choose_car], [taxi_direct], [bike_direct], [walk_to_destination], [walk_to_stop],
+    [taxi_home_to_interchange],
     [attempt_bus], [ride_bus], [attempt_rail], [ride_rail], [wait_at_stop], [taxi_from_stop],
+    [walk_stop_to_interchange],
     [attempt_final_bus], [ride_final_bus], [attempt_final_rail], [ride_final_rail],
     [final_leg_walk], [final_leg_taxi]
 endplayer
@@ -68,6 +70,8 @@ const bool PT_ONLY;
 const int DIST_HOME_TO_STOP;
 const int DIST_INTERCHANGE_TO_DEST;
 const int DIST_HOME_TO_DEST;
+const int DIST_STOP_TO_INTERCHANGE;
+const int DIST_HOME_TO_INTERCHANGE;
 
 // CO2e constants (grams, computed from distances x DfT factors)
 const int CO2E_CAR_DIRECT;
@@ -78,12 +82,14 @@ const int CO2E_BUS_STOP_TO_INT;
 const int CO2E_RAIL_STOP_TO_INT;
 const int CO2E_BUS_FINAL;
 const int CO2E_RAIL_FINAL;
+const int CO2E_TAXI_HOME_INTERCHANGE;
 
 // Time constants (minutes)
 const int TIME_CAR_CLEAR;         const int TIME_CAR_RAIN;         const int TIME_CAR_SEVERE;
 const int TIME_TAXI_DIRECT_CLEAR; const int TIME_TAXI_DIRECT_RAIN; const int TIME_TAXI_DIRECT_SEVERE;
 const int TIME_TAXI_STOP_CLEAR;   const int TIME_TAXI_STOP_RAIN;   const int TIME_TAXI_STOP_SEVERE;
 const int TIME_TAXI_FINAL_CLEAR;  const int TIME_TAXI_FINAL_RAIN;  const int TIME_TAXI_FINAL_SEVERE;
+const int TIME_TAXI_HOME_INTERCHANGE_CLEAR; const int TIME_TAXI_HOME_INTERCHANGE_RAIN; const int TIME_TAXI_HOME_INTERCHANGE_SEVERE;
 const int TIME_BUS_STOP_TO_INT;
 const int TIME_RAIL_STOP_TO_INT;
 const int TIME_FINAL_BUS;
@@ -92,6 +98,7 @@ const int TIME_FINAL_WALK;
 const int TIME_WALK_TO_STOP;
 const int TIME_BIKE_DIRECT;
 const int TIME_WALK_TO_DEST;
+const int TIME_WALK_STOP_TO_INTERCHANGE;
 
 // Fare constants (pence)
 const int BUS_FARE_BASE;
@@ -101,6 +108,7 @@ const int RAIL_FARE_LOW;
 const int TAXI_DIRECT_FARE_BASE;
 const int TAXI_STOP_FARE_BASE;
 const int TAXI_FINAL_FARE_BASE;
+const int TAXI_HOME_INTERCHANGE_FARE_BASE;
 const int CAR_COST;
 const int ROAD_CHARGE_SURCHARGE;
 
@@ -124,6 +132,7 @@ formula car_cost         = policy=3 ? CAR_COST+ROAD_CHARGE_SURCHARGE : CAR_COST;
 formula taxi_direct_fare = policy=3 ? TAXI_DIRECT_FARE_BASE+ROAD_CHARGE_SURCHARGE : TAXI_DIRECT_FARE_BASE;
 formula taxi_stop_fare   = policy=3 ? TAXI_STOP_FARE_BASE+ROAD_CHARGE_SURCHARGE   : TAXI_STOP_FARE_BASE;
 formula taxi_final_fare  = policy=3 ? TAXI_FINAL_FARE_BASE+ROAD_CHARGE_SURCHARGE  : TAXI_FINAL_FARE_BASE;
+formula taxi_home_interchange_fare = policy=3 ? TAXI_HOME_INTERCHANGE_FARE_BASE+ROAD_CHARGE_SURCHARGE : TAXI_HOME_INTERCHANGE_FARE_BASE;
 
 // Effective disruption probabilities -- halved under high_freq policy
 formula eff_cancel = policy=1 ? CANCEL_PROB * 0.5 : CANCEL_PROB;
@@ -146,8 +155,9 @@ formula avg_wait_time =
 // Used to gate give_up -- persona can only abandon when genuinely trapped
 
 formula stuck_home =
-    (!CAR_AVAILABLE | PT_ONLY)
+    (!CAR_AVAILABLE | PT_ONLY | fare_spent+car_cost>FARE_MAX)
     & (fare_spent+taxi_direct_fare>FARE_MAX | PT_ONLY)
+    & (fare_spent+taxi_home_interchange_fare>FARE_MAX | PT_ONLY)
     & (!HAS_BIKE | weather!=0 | BIKE_TOLERANCE<DIST_HOME_TO_DEST)
     & WALK_TOLERANCE<DIST_HOME_TO_DEST
     & WALK_TOLERANCE<DIST_HOME_TO_STOP;
@@ -156,6 +166,7 @@ formula stuck_stop =
     service_status!=1
     & !(service_status=0 & HAS_BUS_STOP & (!NEEDS_STEP_FREE|acc_bus) & (HAS_BUS_PASS|fare_spent+bus_fare<=FARE_MAX))
     & !(service_status=0 & HAS_RAIL_STOP & fare_spent+rail_fare<=FARE_MAX)
+    & WALK_TOLERANCE<DIST_STOP_TO_INTERCHANGE
     & (fare_spent+taxi_stop_fare>FARE_MAX | PT_ONLY);
 
 formula stuck_interchange =
@@ -258,7 +269,7 @@ module m_persona
     // At home (loc=0)
 
     // Car (direct)
-    [choose_car] phase=1 & loc=0 & !done & CAR_AVAILABLE & !PT_ONLY
+    [choose_car] phase=1 & loc=0 & !done & CAR_AVAILABLE & !PT_ONLY & fare_spent+car_cost<=FARE_MAX
         -> (loc'=3) & (mode'=1) & (done'=true);
 
     // Taxi direct
@@ -276,6 +287,10 @@ module m_persona
     // Walk to stop
     [walk_to_stop] phase=1 & loc=0 & !done & WALK_TOLERANCE>=DIST_HOME_TO_STOP
         -> (loc'=1) & (mode'=2);
+
+    // Taxi direct to interchange (bypasses stop)
+    [taxi_home_to_interchange] phase=1 & loc=0 & !done & !PT_ONLY & fare_spent+taxi_home_interchange_fare<=FARE_MAX
+        -> (loc'=2) & (mode'=4) & (fare_spent'=fare_spent+taxi_home_interchange_fare);
 
 
     // At stop (loc=1). attempt_* resolves the service outcome; ride_* (only action when
@@ -331,6 +346,10 @@ module m_persona
     // Taxi from stop
     [taxi_from_stop] phase=1 & loc=1 & !done & pending=0 & !PT_ONLY & fare_spent+taxi_stop_fare<=FARE_MAX
         -> (loc'=3) & (mode'=4) & (fare_spent'=fare_spent+taxi_stop_fare) & (done'=true);
+
+    // Walk from stop to interchange
+    [walk_stop_to_interchange] phase=1 & loc=1 & !done & pending=0 & WALK_TOLERANCE>=DIST_STOP_TO_INTERCHANGE
+        -> (loc'=2) & (mode'=2);
 
 
     // At interchange (loc=2)
@@ -401,12 +420,16 @@ rewards "time"
     [taxi_from_stop]      weather=0 :  TIME_TAXI_STOP_CLEAR;
     [taxi_from_stop]      weather=1 :  TIME_TAXI_STOP_RAIN;
     [taxi_from_stop]      weather=2 :  TIME_TAXI_STOP_SEVERE;
+    [taxi_home_to_interchange] weather=0 : TIME_TAXI_HOME_INTERCHANGE_CLEAR;
+    [taxi_home_to_interchange] weather=1 : TIME_TAXI_HOME_INTERCHANGE_RAIN;
+    [taxi_home_to_interchange] weather=2 : TIME_TAXI_HOME_INTERCHANGE_SEVERE;
     [final_leg_taxi]      weather=0 :  TIME_TAXI_FINAL_CLEAR;
     [final_leg_taxi]      weather=1 :  TIME_TAXI_FINAL_RAIN;
     [final_leg_taxi]      weather=2 :  TIME_TAXI_FINAL_SEVERE;
     [bike_direct]         true      :  TIME_BIKE_DIRECT;
     [walk_to_destination] true      :  TIME_WALK_TO_DEST;
     [walk_to_stop]        true      :  TIME_WALK_TO_STOP;
+    [walk_stop_to_interchange] true :  TIME_WALK_STOP_TO_INTERCHANGE;
     [ride_bus]            true      :  TIME_BUS_STOP_TO_INT;
     [ride_rail]           true      :  TIME_RAIL_STOP_TO_INT;
     [ride_final_bus]      true      :  TIME_FINAL_BUS;
@@ -420,6 +443,7 @@ rewards "co2e"
     [choose_car]          true :  CO2E_CAR_DIRECT;
     [taxi_direct]         true :  CO2E_TAXI_DIRECT;
     [taxi_from_stop]      true :  CO2E_TAXI_STOP;
+    [taxi_home_to_interchange] true : CO2E_TAXI_HOME_INTERCHANGE;
     [final_leg_taxi]      true :  CO2E_TAXI_FINAL;
     [ride_bus]            true :  CO2E_BUS_STOP_TO_INT;
     [ride_rail]           true :  CO2E_RAIL_STOP_TO_INT;
@@ -428,6 +452,7 @@ rewards "co2e"
     [bike_direct]         true :     0;
     [walk_to_destination] true :     0;
     [walk_to_stop]        true :     0;
+    [walk_stop_to_interchange] true : 0;
     [final_leg_walk]      true :     0;
 endrewards
 
@@ -438,6 +463,7 @@ rewards "fare"
     [ride_rail]       true : rail_fare;
     [taxi_direct]     true : taxi_direct_fare;
     [taxi_from_stop]  true : taxi_stop_fare;
+    [taxi_home_to_interchange] true : taxi_home_interchange_fare;
     [ride_final_bus]  true : bus_fare;
     [ride_final_rail] true : rail_fare;
     [final_leg_taxi]  true : taxi_final_fare;
@@ -446,6 +472,7 @@ endrewards
 // Rewards: walking distance (metres)
 rewards "walking_distance"
     [walk_to_stop]        true :  DIST_HOME_TO_STOP;
+    [walk_stop_to_interchange] true : DIST_STOP_TO_INTERCHANGE;
     [final_leg_walk]      true :  DIST_INTERCHANGE_TO_DEST;
     [walk_to_destination] true :  DIST_HOME_TO_DEST;
 endrewards
@@ -465,12 +492,16 @@ rewards "generalized_cost"
     [taxi_from_stop]      weather=0 : W_TIME*TIME_TAXI_STOP_CLEAR    + W_FARE*taxi_stop_fare;
     [taxi_from_stop]      weather=1 : W_TIME*TIME_TAXI_STOP_RAIN     + W_FARE*taxi_stop_fare;
     [taxi_from_stop]      weather=2 : W_TIME*TIME_TAXI_STOP_SEVERE   + W_FARE*taxi_stop_fare;
+    [taxi_home_to_interchange] weather=0 : W_TIME*TIME_TAXI_HOME_INTERCHANGE_CLEAR  + W_FARE*taxi_home_interchange_fare;
+    [taxi_home_to_interchange] weather=1 : W_TIME*TIME_TAXI_HOME_INTERCHANGE_RAIN   + W_FARE*taxi_home_interchange_fare;
+    [taxi_home_to_interchange] weather=2 : W_TIME*TIME_TAXI_HOME_INTERCHANGE_SEVERE + W_FARE*taxi_home_interchange_fare;
     [final_leg_taxi]      weather=0 : W_TIME*TIME_TAXI_FINAL_CLEAR   + W_FARE*taxi_final_fare;
     [final_leg_taxi]      weather=1 : W_TIME*TIME_TAXI_FINAL_RAIN    + W_FARE*taxi_final_fare;
     [final_leg_taxi]      weather=2 : W_TIME*TIME_TAXI_FINAL_SEVERE  + W_FARE*taxi_final_fare;
     [bike_direct]         true      : W_TIME*TIME_BIKE_DIRECT;
     [walk_to_destination] true      : W_TIME*TIME_WALK_TO_DEST       + W_WALK*DIST_HOME_TO_DEST;
     [walk_to_stop]        true      : W_TIME*TIME_WALK_TO_STOP       + W_WALK*DIST_HOME_TO_STOP;
+    [walk_stop_to_interchange] true : W_TIME*TIME_WALK_STOP_TO_INTERCHANGE + W_WALK*DIST_STOP_TO_INTERCHANGE;
     [ride_bus]            true      : W_TIME*TIME_BUS_STOP_TO_INT    + W_FARE*bus_fare;
     [ride_rail]           true      : W_TIME*TIME_RAIL_STOP_TO_INT   + W_FARE*rail_fare;
     [ride_final_bus]      true      : W_TIME*TIME_FINAL_BUS          + W_FARE*bus_fare;
@@ -490,6 +521,7 @@ rewards "revenue"
     [choose_car]      policy=3 : ROAD_CHARGE_SURCHARGE;
     [taxi_direct]     policy=3 : ROAD_CHARGE_SURCHARGE;
     [taxi_from_stop]  policy=3 : ROAD_CHARGE_SURCHARGE;
+    [taxi_home_to_interchange] policy=3 : ROAD_CHARGE_SURCHARGE;
     [final_leg_taxi]  policy=3 : ROAD_CHARGE_SURCHARGE;
 endrewards
 

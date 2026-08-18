@@ -1,0 +1,31 @@
+{
+  "_corridor": "Giffnock to University of Glasgow (Gilmorehill)",
+  "_unit": "pence (GBP \u00d7 100)",
+  "base_fares": {
+    "bus": 245,
+    "rail": 430
+  },
+  "car": {
+    "cost_per_km": 15
+  },
+  "policy_overrides": {
+    "low_fare": {
+      "bus": 100,
+      "rail": 200
+    },
+    "road_charge": {
+      "surcharge": 3800
+    },
+    "high_freq": {
+      "cost_per_traveller": 150
+    },
+    "accessible_service": {
+      "cost_per_traveller": 100
+    }
+  },
+  "taxi": {
+    "initial_charge": 300,
+    "price_per_km": 150
+  },
+  "name": "test1_custom"
+}
