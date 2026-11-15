@@ -15,7 +15,19 @@ from pathlib import Path
 from preprocessing import get_trip_constants_from_data, to_prism_const_string
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-PRISM_EXE   = r"C:\prism-games\bin\prism.bat"
+def _find_prism() -> str:
+    """PRISM-games executable: $PRISM_GAMES, then a local 3.2.4 install, then `prism` on PATH."""
+    import shutil
+    env = os.environ.get("PRISM_GAMES")
+    if env:
+        return env
+    local = Path.home() / "prism-games-3.2.4-linux64-x86" / "bin" / "prism"
+    if local.exists():
+        return str(local)
+    return shutil.which("prism") or "prism"
+
+
+PRISM_EXE   = _find_prism()
 BASE_DIR    = Path(__file__).resolve().parent.parent          # transport-personas-games/
 MODEL_FILE  = BASE_DIR / "models" / "transport_smg.pm"
 PROPS_FILE  = BASE_DIR / "props"  / "transport_smg.props"

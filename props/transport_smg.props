@@ -77,7 +77,7 @@
 <<manager>> R{"co2e"}min=? [ F done ]
 
 // 16. Minimum abandonment rate the manager can enforce
-<<manager>> Pmax=? [ F (done & abandon) ]
+<<manager>> Pmin=? [ F (done & abandon) ]
 
 
 // SECTION E — THRESHOLDS (yes/no): does a strategy exist satisfying this constraint?

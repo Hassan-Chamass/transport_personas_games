@@ -1,5 +1,9 @@
 # ── PRISM output files ──────────────────────────────────────────────────────
 results/
+# ...except the paper's reference results; their raw logs and DOT dumps can be regenerated
+!reproducibility/results/
+reproducibility/results/raw/
+reproducibility/results/strategies/
 *.tra
 *.sta
 *.lab

@@ -40,7 +40,9 @@ POLICY_CONFIG_FILE  = PARAMS_DIR / "run_config.json"
 
 # Make scripts importable (preprocessing.py lives there)
 sys.path.insert(0, str(SCRIPTS_DIR))
-from runner import build_const_string, run_combination, export_dot  # noqa: E402
+from runner import build_const_string, run_combination, export_dot, STRAT_DIR  # noqa: E402
+import strategy_view  # noqa: E402  (in-app rendering of exported strategies)
+from strategy_support import classify as strategy_class, REQUIREMENT as STRATEGY_REQUIREMENT  # noqa: E402
 
 app = Flask(__name__, static_folder=str(STATIC_DIR))
 
@@ -233,7 +235,11 @@ def get_run_config():
 
 @app.route("/api/props")
 def get_props():
-    return jsonify(_parse_props(PROPS_FILE))
+    props = _parse_props(PROPS_FILE)
+    for p in props:                       # which properties give a strategy worth viewing
+        if "formula" in p:
+            p["strategy"] = strategy_class(p["formula"])
+    return jsonify(props)
 
 
 # ── Persona / Scenario templates ──────────────────────────────────────────────
@@ -338,7 +344,13 @@ def export_dot_route():
     prop_index    = body.get("prop")
 
     if not persona or not scenario or prop_index is None:
-        return jsonify({"error": "persona, scenario, and prop are required"}), 400
+        return jsonify({"error": STRATEGY_REQUIREMENT}), 400
+
+    prop_info = next((p for p in _parse_props(PROPS_FILE) if p.get("index") == int(prop_index)), None)
+    if prop_info:
+        cls = strategy_class(prop_info["formula"])
+        if not cls["exportable"]:
+            return jsonify({"error": f"Property {prop_index} has no strategy to show. {cls['why']}"}), 400
 
     try:
         const_str = build_const_string(
@@ -354,7 +366,17 @@ def export_dot_route():
         s_name = scenario.get("name", "scenario")
         label  = f"{p_name}_{s_name}_transport_smg"
         dot_content = export_dot(label, const_str, int(prop_index))
-        return jsonify({"dot": dot_content})
+        out = {"dot": dot_content}
+        # Rendered views for the in-app viewer (needs Graphviz; the DOT text is returned either way)
+        try:
+            raw = (STRAT_DIR / f"{label}_prop{int(prop_index)}_raw.dot").read_text(encoding="utf-8", errors="replace")
+            title = f"{p_name.replace('_', ' ')}, {s_name.replace('_', ' ')}"
+            prop = prop_info
+            out["prop"] = dict(prop, strategy=strategy_class(prop["formula"])) if prop else None
+            out["views"] = strategy_view.views(raw, title, prop)
+        except Exception as e:  # rendering is optional
+            out["views_error"] = str(e)
+        return jsonify(out)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -468,5 +490,9 @@ def _sse(data: dict) -> str:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Starting PRISM Verificator at http://localhost:5000")
-    app.run(debug=True, threaded=True, port=5000)
+    import os
+    host  = os.environ.get("TPG_HOST", "127.0.0.1")
+    port  = int(os.environ.get("TPG_PORT", "5000"))
+    debug = os.environ.get("TPG_DEBUG", "1") == "1"
+    print(f"Starting PRISM Verificator at http://localhost:{port}")
+    app.run(debug=debug, threaded=True, host=host, port=port)
